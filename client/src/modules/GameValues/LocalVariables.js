@@ -1,0 +1,38 @@
+// =====================================================
+// GAME VARIABLES
+// =====================================================
+
+export const variable = {
+    room: null,
+    player: null,
+    playerId: null,
+    allPlayers: {},
+    cursors: null,
+    wasd: null,
+    groundBlocks: [],
+    stoneBlocks: [],
+    spikeBlocks: [],
+    platforms: [],
+    enemySpawnTimer: 0,
+    checkpoints: [],
+    lastCheckpoint: null,
+    playerHealth: 0,
+    healthBarBg: null,
+    healthBarFill: null,
+    healthBarDelayed: null,
+    healthBarTargetWidth: 300,
+    playerSpawnProtected: false,
+    sightGraphics: null,
+    grassScale: null,
+    grassScaledWidth: null,
+    grassScaledHeight: null,
+    stoneScale: null,
+    stoneW: null,
+    stoneH: null,
+    blockWidth: null,
+    blockHeight: null,
+    deathPixels: [],
+    sceneRef: null,
+    enemies: {},
+    allBlocks: [],
+}
