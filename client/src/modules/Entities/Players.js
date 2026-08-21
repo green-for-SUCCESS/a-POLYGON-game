@@ -137,7 +137,7 @@ export function playerMovementCheck() {
         variable.player.body.velocity.x += accelX;
 
         const dragAccelY =
-            SETTINGS.PLAYER_DRAG_COEFFICIENT *
+            SETTINGS.PLAYER_VERTICAL_DRAG_COEFFICIENT *
             variable.player.body.velocity.y;
 
         accelY -= dragAccelY;
