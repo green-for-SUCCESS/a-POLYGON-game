@@ -18,6 +18,10 @@ export function update() {
         return;
     }
 
+    if (!variable.player.active || variable.deathScreen) {
+        return;
+    }
+
     // =================================================
     // SPAWN PROTECTION
     // =================================================

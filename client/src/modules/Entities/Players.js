@@ -127,16 +127,22 @@ export function playerMovementCheck() {
             accel += SETTINGS.PLAYER_MOVE_FORCE / SETTINGS.PLAYER_MASS;
         }
     
-        const dragAccel =
-        SETTINGS.PLAYER_DRAG_COEFFICIENT *
+        const dragAccelX =
+            SETTINGS.PLAYER_DRAG_COEFFICIENT *
             variable.player.body.velocity.x;
-        
-            accel -= dragAccel;
-    
+
+        accel -= dragAccelX;
+
         variable.player.body.velocity.x += accel;
-    
+
+        const dragAccelY =
+            SETTINGS.PLAYER_DRAG_COEFFICIENT *
+            variable.player.body.velocity.y;
+
+        variable.player.body.velocity.y -= dragAccelY;
+
         // JUMP
-    
+
         if (
             (
                 variable.cursors.up.isDown ||
@@ -144,7 +150,6 @@ export function playerMovementCheck() {
             ) &&
             variable.player.body.touching.down
         ) {
-        
             variable.player.setVelocityY(
                 SETTINGS.JUMP_STRENGTH
             );
@@ -216,6 +221,10 @@ export function damagePlayer(amount) {
 
     
         updateHealthBar();
+
+        if (variable.room) {
+            variable.room.send("suicide");
+        }
 
     
         shatterPlayer();
@@ -332,8 +341,117 @@ export function shatterPlayer() {
         }
     }
 
-    // Respawn is triggered by the server sending health > 0 back.
-    // In singleplayer / offline mode, call respawnPlayer() directly instead.
+    showDeathScreen();
+}
+
+// =====================================================
+// DEATH SCREEN
+// =====================================================
+
+export function showDeathScreen() {
+    if (variable.deathScreen) {
+        return;
+    }
+
+    const scene = variable.sceneRef;
+    const { width, height } = scene.scale;
+
+    const overlay = scene.add.rectangle(
+        0,
+        0,
+        width,
+        height,
+        0x000000,
+        0.72
+    );
+    overlay.setOrigin(0, 0);
+    overlay.setScrollFactor(0);
+    overlay.setDepth(5000);
+
+    const title = scene.add.text(
+        width / 2,
+        height * 0.38,
+        "YOU DIED",
+        {
+            fontSize: "72px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 6
+        }
+    );
+    title.setOrigin(0.5);
+    title.setScrollFactor(0);
+    title.setDepth(5001);
+
+    const btnW = 260;
+    const btnH = 80;
+    const btnX = width / 2 - btnW / 2;
+    const btnY = height * 0.52;
+    const btnRadius = 20;
+
+    const btnBg = scene.add.graphics();
+    btnBg.setScrollFactor(0);
+    btnBg.setDepth(5001);
+
+    function drawButton(color) {
+        btnBg.clear();
+        btnBg.fillStyle(color, 0.95);
+        btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, btnRadius);
+        btnBg.lineStyle(3, 0xffffff, 1);
+        btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, btnRadius);
+    }
+
+    drawButton(0x222222);
+
+    const btnHit = scene.add.rectangle(btnX, btnY, btnW, btnH, 0x000000, 0);
+    btnHit
+        .setOrigin(0)
+        .setInteractive({ useHandCursor: true })
+        .setScrollFactor(0)
+        .setDepth(5002);
+
+    const btnText = scene.add.text(
+        btnX + btnW / 2,
+        btnY + btnH / 2,
+        "RESPAWN",
+        {
+            fontSize: "36px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff"
+        }
+    );
+    btnText.setOrigin(0.5);
+    btnText.setScrollFactor(0);
+    btnText.setDepth(5003);
+
+    btnHit.on("pointerdown", () => drawButton(0x1a1a1a));
+    btnHit.on("pointerout", () => drawButton(0x222222));
+    btnHit.on("pointerup", () => {
+        drawButton(0x222222);
+        if (variable.room) {
+            variable.room.send("respawn");
+        } else {
+            hideDeathScreen();
+            respawnPlayer({ immediate: true });
+        }
+    });
+
+    variable.deathScreen = { overlay, title, btnBg, btnHit, btnText };
+}
+
+export function hideDeathScreen() {
+    if (!variable.deathScreen) {
+        return;
+    }
+
+    const { overlay, title, btnBg, btnHit, btnText } = variable.deathScreen;
+    overlay.destroy();
+    title.destroy();
+    btnBg.destroy();
+    btnHit.destroy();
+    btnText.destroy();
+    variable.deathScreen = null;
 }
 
 // =====================================================
@@ -342,14 +460,11 @@ export function shatterPlayer() {
 
 export function respawnPlayer({ immediate = false } = {}) {
 
+    hideDeathScreen();
+
     let x = SETTINGS.PLAYER_START_X;
 
-    let y =
-    window.innerHeight
-        - 32
-        - (variable.grassScaledHeight / 2)
-        - (SETTINGS.PLAYER_SIZE / 2)
-        - 20;
+    let y = SETTINGS.ENTITY_SPAWN_HEIGHT;
     
     if (variable.lastCheckpoint) {
         x = variable.lastCheckpoint.x;

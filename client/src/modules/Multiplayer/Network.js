@@ -56,10 +56,10 @@ export async function connect() {
                     updateHealthBar();
 
                     if (prev > 0 && next <= 0) {
-                        // Server killed us — trigger visual death (no auto-respawn)
+                        // Server killed us — shatter + death screen (manual respawn)
                         shatterPlayer();
                     } else if (prev <= 0 && next > 0) {
-                        // Server already waited the respawn delay — re-enable immediately
+                        // Player chose respawn from the death screen
                         respawnPlayer({ immediate: true });
                     }
                 }

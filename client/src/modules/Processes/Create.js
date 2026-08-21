@@ -268,8 +268,12 @@ export function create() {
     btnHit.on('pointerup', () => {
     
         drawButton(0x222222);
-        
-        damagePlayer(SETTINGS.PLAYER_MAX_HEALTH);
+
+        if (variable.room) {
+            variable.room.send("suicide");
+        } else {
+            damagePlayer(SETTINGS.PLAYER_MAX_HEALTH);
+        }
     });
 
     // =================================================

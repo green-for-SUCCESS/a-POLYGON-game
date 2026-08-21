@@ -2,7 +2,7 @@ import World from "../../node_modules/phaser/src/physics/arcade/World.js";
 import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.js";
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
-import { blockWidth, blockHeight, groundBlocks } from "../../../shared-data/Environment.js";
+import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack } from "./Enemies.js";
 
 const SPAWN_INTERVAL_MS = 1000;
@@ -34,15 +34,16 @@ export class HeadlessGame {
     }
 
     _setupGround() {
-        for (const block of groundBlocks) {
-            const ground = new StaticBody(this.world);
+        // One continuous floor avoids seam gaps and StaticBody setter
+        // double-inserts that were letting enemies fall through the tiles.
+        const groundTop = SETTINGS.WORLD_HEIGHT - 32 - blockHeight / 2;
+        const ground = new StaticBody(this.world);
 
-            ground.setSize(blockWidth, blockHeight, false);
-            ground.x = block.x - blockWidth / 2;
-            ground.y = block.y - blockHeight / 2;
+        ground.setSize(SETTINGS.WORLD_WIDTH + blockWidth, blockHeight, false);
+        ground.position.set(-blockWidth / 2, groundTop);
+        ground.updateCenter();
 
-            this.world.add(ground);
-        }
+        this.world.add(ground);
     }
 
     setPlayers(players) {

@@ -13,9 +13,6 @@ export class BattleRoom extends Room {
         this.game = new HeadlessGame();
         this.game.setPlayers(this.state.players);
 
-        // Tracks which players are currently dead (awaiting respawn)
-        this._deadPlayers = new Set();
-
         this.onMessage("updatePosition", (client, data) => {
             const player = this.state.players.get(client.sessionId);
             if (!player || player.health <= 0) {
@@ -27,12 +24,32 @@ export class BattleRoom extends Room {
             player.isFastFalling = !!data.isFastFalling;
         });
 
+        this.onMessage("suicide", (client) => {
+            const player = this.state.players.get(client.sessionId);
+            if (!player || player.health <= 0) {
+                return;
+            }
+
+            player.health = 0;
+        });
+
+        this.onMessage("respawn", (client) => {
+            const player = this.state.players.get(client.sessionId);
+            if (!player || player.health > 0) {
+                return;
+            }
+
+            player.health = SETTINGS.PLAYER_MAX_HEALTH;
+            player.x = SETTINGS.PLAYER_START_X;
+            player.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
+            player.isFastFalling = false;
+        });
+
         this.setSimulationInterval((deltaTime) => {
             this.game.update(deltaTime);
             this.game.resolveFastFallHits();
             this._syncEnemies();
             this._dispatchKnockbacks();
-            this._checkDeaths();
         });
     }
 
@@ -56,26 +73,6 @@ export class BattleRoom extends Room {
                 y: event.pusherY,
                 strength: event.strength,
             });
-        }
-    }
-
-    _checkDeaths() {
-        for (const [sessionId, player] of this.state.players) {
-            if (player.health <= 0 && !this._deadPlayers.has(sessionId)) {
-                this._deadPlayers.add(sessionId);
-
-                this.clock.setTimeout(() => {
-                    if (!this.state.players.has(sessionId)) return;
-
-                    const p = this.state.players.get(sessionId);
-                    p.health = SETTINGS.PLAYER_MAX_HEALTH;
-                    p.x = SETTINGS.PLAYER_START_X;
-                    p.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
-                    p.isFastFalling = false;
-
-                    this._deadPlayers.delete(sessionId);
-                }, SETTINGS.PLAYER_RESPAWN_DELAY);
-            }
         }
     }
 

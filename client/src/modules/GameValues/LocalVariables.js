@@ -32,6 +32,7 @@ export const variable = {
     blockWidth: null,
     blockHeight: null,
     deathPixels: [],
+    deathScreen: null,
     sceneRef: null,
     enemies: {},
     allBlocks: [],
