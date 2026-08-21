@@ -9,7 +9,7 @@ import { shatterAt } from "../Entities/Effects.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 
-export const client = new Colyseus.Client("ws://localhost:2567");
+export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
 
 export async function connect() {
     try {
