@@ -5,10 +5,11 @@
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 
 export function preload() {
+    const base = import.meta.env.BASE_URL;
 
-    this.load.image('grass', 'assets/Grass.png');
-    this.load.image('stone', 'assets/Stone.png');
-    this.load.image('spike', 'assets/Spikes.png');
+    this.load.image('grass', `${base}assets/Grass.png`);
+    this.load.image('stone', `${base}assets/Stone.png`);
+    this.load.image('spike', `${base}assets/Spikes.png`);
 
     // PLAYER
 
