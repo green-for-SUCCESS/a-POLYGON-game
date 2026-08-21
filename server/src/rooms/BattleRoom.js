@@ -70,7 +70,7 @@ export class BattleRoom extends Room {
                     const p = this.state.players.get(sessionId);
                     p.health = SETTINGS.PLAYER_MAX_HEALTH;
                     p.x = SETTINGS.PLAYER_START_X;
-                    p.y = 700;
+                    p.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
                     p.isFastFalling = false;
 
                     this._deadPlayers.delete(sessionId);
