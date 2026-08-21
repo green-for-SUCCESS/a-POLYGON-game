@@ -118,28 +118,31 @@ export function playerMovementCheck() {
     if (!variable.player.isFastFalling) {
 
     
-        let accel = 0;
-    
+        let accelX = 0;
+        let accelY = 0;
+
         if (variable.cursors.left.isDown || variable.wasd.A.isDown) {
-            accel -= SETTINGS.PLAYER_MOVE_FORCE / SETTINGS.PLAYER_MASS;
+            accelX -= SETTINGS.PLAYER_MOVE_FORCE / SETTINGS.PLAYER_MASS;
         }
         else if (variable.cursors.right.isDown || variable.wasd.D.isDown) {
-            accel += SETTINGS.PLAYER_MOVE_FORCE / SETTINGS.PLAYER_MASS;
+            accelX += SETTINGS.PLAYER_MOVE_FORCE / SETTINGS.PLAYER_MASS;
         }
-    
+
         const dragAccelX =
             SETTINGS.PLAYER_DRAG_COEFFICIENT *
             variable.player.body.velocity.x;
 
-        accel -= dragAccelX;
+        accelX -= dragAccelX;
 
-        variable.player.body.velocity.x += accel;
+        variable.player.body.velocity.x += accelX;
 
         const dragAccelY =
             SETTINGS.PLAYER_DRAG_COEFFICIENT *
             variable.player.body.velocity.y;
 
-        variable.player.body.velocity.y -= dragAccelY;
+        accelY -= dragAccelY;
+
+        variable.player.body.velocity.y += accelY;
 
         // JUMP
 
