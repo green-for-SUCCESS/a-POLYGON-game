@@ -373,7 +373,7 @@ export function showDeathScreen() {
 
     const title = scene.add.text(
         width / 2,
-        height * 0.38,
+        height * 0.32,
         "YOU DIED",
         {
             fontSize: "72px",
@@ -387,36 +387,63 @@ export function showDeathScreen() {
     title.setScrollFactor(0);
     title.setDepth(5001);
 
+    // BUTTON SETTINGS
+
     const btnW = 260;
     const btnH = 80;
-    const btnX = width / 2 - btnW / 2;
-    const btnY = height * 0.52;
     const btnRadius = 20;
+    const btnGap = 20;
 
-    const btnBg = scene.add.graphics();
-    btnBg.setScrollFactor(0);
-    btnBg.setDepth(5001);
+    const btnX = width / 2 - btnW / 2;
 
-    function drawButton(color) {
-        btnBg.clear();
-        btnBg.fillStyle(color, 0.95);
-        btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, btnRadius);
-        btnBg.lineStyle(3, 0xffffff, 1);
-        btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, btnRadius);
+    // RESPAWN BUTTON
+
+    const respawnY = height * 0.46;
+
+    const respawnBg = scene.add.graphics();
+    respawnBg.setScrollFactor(0);
+    respawnBg.setDepth(5001);
+
+    function drawRespawnButton(color) {
+        respawnBg.clear();
+        respawnBg.fillStyle(color, 0.95);
+        respawnBg.fillRoundedRect(
+            btnX,
+            respawnY,
+            btnW,
+            btnH,
+            btnRadius
+        );
+        respawnBg.lineStyle(3, 0xffffff, 1);
+        respawnBg.strokeRoundedRect(
+            btnX,
+            respawnY,
+            btnW,
+            btnH,
+            btnRadius
+        );
     }
 
-    drawButton(0x222222);
+    drawRespawnButton(0x222222);
 
-    const btnHit = scene.add.rectangle(btnX, btnY, btnW, btnH, 0x000000, 0);
-    btnHit
+    const respawnHit = scene.add.rectangle(
+        btnX,
+        respawnY,
+        btnW,
+        btnH,
+        0x000000,
+        0
+    );
+
+    respawnHit
         .setOrigin(0)
         .setInteractive({ useHandCursor: true })
         .setScrollFactor(0)
         .setDepth(5002);
 
-    const btnText = scene.add.text(
+    const respawnText = scene.add.text(
         btnX + btnW / 2,
-        btnY + btnH / 2,
+        respawnY + btnH / 2,
         "RESPAWN",
         {
             fontSize: "36px",
@@ -424,14 +451,22 @@ export function showDeathScreen() {
             color: "#ffffff"
         }
     );
-    btnText.setOrigin(0.5);
-    btnText.setScrollFactor(0);
-    btnText.setDepth(5003);
 
-    btnHit.on("pointerdown", () => drawButton(0x1a1a1a));
-    btnHit.on("pointerout", () => drawButton(0x222222));
-    btnHit.on("pointerup", () => {
-        drawButton(0x222222);
+    respawnText.setOrigin(0.5);
+    respawnText.setScrollFactor(0);
+    respawnText.setDepth(5003);
+
+    respawnHit.on("pointerdown", () => {
+        drawRespawnButton(0x1a1a1a);
+    });
+
+    respawnHit.on("pointerout", () => {
+        drawRespawnButton(0x222222);
+    });
+
+    respawnHit.on("pointerup", () => {
+        drawRespawnButton(0x222222);
+
         if (variable.room) {
             variable.room.send("respawn");
         } else {
@@ -440,7 +475,103 @@ export function showDeathScreen() {
         }
     });
 
-    variable.deathScreen = { overlay, title, btnBg, btnHit, btnText };
+    // MENU BUTTON
+
+    const menuY = respawnY + btnH + btnGap;
+
+    const menuBg = scene.add.graphics();
+    menuBg.setScrollFactor(0);
+    menuBg.setDepth(5001);
+
+    function drawMenuButton(color) {
+        menuBg.clear();
+        menuBg.fillStyle(color, 0.95);
+        menuBg.fillRoundedRect(
+            btnX,
+            menuY,
+            btnW,
+            btnH,
+            btnRadius
+        );
+        menuBg.lineStyle(3, 0xffffff, 1);
+        menuBg.strokeRoundedRect(
+            btnX,
+            menuY,
+            btnW,
+            btnH,
+            btnRadius
+        );
+    }
+
+    drawMenuButton(0x222222);
+
+    const menuHit = scene.add.rectangle(
+        btnX,
+        menuY,
+        btnW,
+        btnH,
+        0x000000,
+        0
+    );
+
+    menuHit
+        .setOrigin(0)
+        .setInteractive({ useHandCursor: true })
+        .setScrollFactor(0)
+        .setDepth(5002);
+
+    const menuText = scene.add.text(
+        btnX + btnW / 2,
+        menuY + btnH / 2,
+        "BACK TO MENU",
+        {
+            fontSize: "36px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff"
+        }
+    );
+
+    menuText.setOrigin(0.5);
+    menuText.setScrollFactor(0);
+    menuText.setDepth(5003);
+
+    menuHit.on("pointerdown", () => {
+        drawMenuButton(0x1a1a1a);
+    });
+
+    menuHit.on("pointerout", () => {
+        drawMenuButton(0x222222);
+    });
+
+    menuHit.on("pointerup", () => {
+        drawMenuButton(0x222222);
+
+        hideDeathScreen();
+
+        // If connected to multiplayer, leave the room first.
+        if (variable.room) {
+            variable.room.leave();
+            variable.room = null;
+        }
+
+        // Change "Menu" if your actual menu scene has a different name.
+        scene.scene.start("Menu");
+    });
+
+    // SAVE REFERENCES
+
+    variable.deathScreen = {
+        overlay,
+        title,
+
+        respawnBg,
+        respawnHit,
+        respawnText,
+
+        menuBg,
+        menuHit,
+        menuText
+    };
 }
 
 export function hideDeathScreen() {
@@ -448,12 +579,30 @@ export function hideDeathScreen() {
         return;
     }
 
-    const { overlay, title, btnBg, btnHit, btnText } = variable.deathScreen;
+    const {
+        overlay,
+        title,
+
+        respawnBg,
+        respawnHit,
+        respawnText,
+
+        menuBg,
+        menuHit,
+        menuText
+    } = variable.deathScreen;
+
     overlay.destroy();
     title.destroy();
-    btnBg.destroy();
-    btnHit.destroy();
-    btnText.destroy();
+
+    respawnBg.destroy();
+    respawnHit.destroy();
+    respawnText.destroy();
+
+    menuBg.destroy();
+    menuHit.destroy();
+    menuText.destroy();
+
     variable.deathScreen = null;
 }
 
