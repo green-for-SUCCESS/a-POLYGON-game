@@ -8,8 +8,6 @@ import {
     getAuth,
     GoogleAuthProvider,
     signInWithPopup,
-    signInWithRedirect,
-    getRedirectResult,
     signOut as firebaseSignOut,
     onAuthStateChanged
 } from "firebase/auth";
@@ -83,24 +81,8 @@ export async function getUserProfile(uid) {
     return snap.exists() ? snap.data() : null;
 }
 
-let redirectResultChecked = false;
-
-function usesRedirectSignIn() {
-    const { hostname } = window.location;
-    return hostname !== "localhost" && hostname !== "127.0.0.1";
-}
 
 export async function getSession() {
-    if (!redirectResultChecked) {
-        redirectResultChecked = true;
-
-        try {
-            const { auth: firebaseAuth } = getFirebase();
-            await getRedirectResult(firebaseAuth);
-        } catch {
-        }
-    }
-
     const user = await waitForAuth();
 
     if (!user) {
@@ -117,14 +99,6 @@ export async function getSession() {
 
 export async function signInWithGoogle() {
     const { auth: firebaseAuth } = getFirebase();
-    const provider = new GoogleAuthProvider();
-
-    // GitHub Pages sends COOP: same-origin, which breaks popup polling.
-    if (usesRedirectSignIn()) {
-        await signInWithRedirect(firebaseAuth, provider);
-        return { user: null, username: null, redirecting: true };
-    }
-
     const result = await signInWithPopup(firebaseAuth, provider);
     const profile = await getUserProfile(result.user.uid);
 
