@@ -8,6 +8,7 @@ import {
     getAuth,
     GoogleAuthProvider,
     signInWithPopup,
+    getPopupResult,
     signOut as firebaseSignOut,
     onAuthStateChanged
 } from "firebase/auth";
@@ -94,7 +95,7 @@ export async function getSession() {
 
         try {
             const { auth: firebaseAuth } = getFirebase();
-            await getRedirectResult(firebaseAuth);
+            await getPopupResult(firebaseAuth);
         } catch {
         }
     }
