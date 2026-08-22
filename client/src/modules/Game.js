@@ -9,7 +9,7 @@ import { create } from "./Processes/Create.js";
 import { update } from "./Processes/Update.js";
 import { createHome } from "./Processes/Home.js";
 
-export class HomeScene extends Phaser.Scene {
+class HomeScene extends Phaser.Scene {
     constructor() {
         super("Home");
     }
@@ -19,7 +19,7 @@ export class HomeScene extends Phaser.Scene {
     }
 }
 
-export class GameScene extends Phaser.Scene {
+class GameScene extends Phaser.Scene {
     constructor() {
         super("Game");
     }
