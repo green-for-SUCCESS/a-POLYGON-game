@@ -99,7 +99,7 @@ export async function getSession() {
 
 export async function signInWithGoogle() {
     const { auth: firebaseAuth } = getFirebase();
-    const result = await signInWithPopup(firebaseAuth, provider);
+    const result = await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
     const profile = await getUserProfile(result.user.uid);
 
     return {
