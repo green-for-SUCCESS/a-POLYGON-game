@@ -7,7 +7,19 @@ import { SETTINGS } from "../../../shared-data/Constants.js";
 import { preload } from "./Processes/Preload.js";
 import { create } from "./Processes/Create.js";
 import { update } from "./Processes/Update.js";
-import { createHome } from "./Processes/Home.js";
+import { loadHome } from "./Processes/Home.js";
+import { createLogin } from "./Processes/Login.js";
+
+class LoginScene extends Phaser.Scene {
+
+    constructor() {
+        super("LoginScene");
+    }
+
+    create() {
+        createLogin.call(this);
+    }
+}
 
 class HomeScene extends Phaser.Scene {
     constructor() {
@@ -15,7 +27,7 @@ class HomeScene extends Phaser.Scene {
     }
 
     create() {
-        createHome.call(this);
+        loadHome.call(this);
     }
 }
 
@@ -53,7 +65,7 @@ const config = {
         },
     },
 
-    scene: [HomeScene, GameScene],
+    scene: [HomeScene, LoginScene, GameScene],
 };
 
 export const game = new Phaser.Game(config);
