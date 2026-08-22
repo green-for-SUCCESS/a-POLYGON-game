@@ -18,24 +18,52 @@ import {
     serverTimestamp
 } from "firebase/firestore";
 
+// Paste Project settings → Your apps → SDK setup and configuration here.
+// Firebase web keys are public; protect the project with Auth domains + Firestore rules.
 const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+    appId: import.meta.env.VITE_FIREBASE_APP_ID || ""
 };
 
-export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+let app = null;
+let auth = null;
+let db = null;
 
-const googleProvider = new GoogleAuthProvider();
+function isConfigured() {
+    return typeof firebaseConfig.apiKey === "string"
+        && firebaseConfig.apiKey.startsWith("AIza")
+        && Boolean(firebaseConfig.projectId);
+}
+
+function getFirebase() {
+    if (!isConfigured()) {
+        throw new Error(
+            "Firebase is not configured. Paste your web app config into FirebaseInit.js (or set VITE_FIREBASE_* and rebuild)."
+        );
+    }
+
+    if (!app) {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+    }
+
+    return { app, auth, db };
+}
 
 export function waitForAuth() {
+    if (!isConfigured()) {
+        return Promise.resolve(null);
+    }
+
+    const { auth: firebaseAuth } = getFirebase();
+
     return new Promise((resolve) => {
-        const unsub = onAuthStateChanged(auth, (user) => {
+        const unsub = onAuthStateChanged(firebaseAuth, (user) => {
             unsub();
             resolve(user);
         });
@@ -43,7 +71,8 @@ export function waitForAuth() {
 }
 
 export async function getUserProfile(uid) {
-    const snap = await getDoc(doc(db, "users", uid));
+    const { db: firestore } = getFirebase();
+    const snap = await getDoc(doc(firestore, "users", uid));
     return snap.exists() ? snap.data() : null;
 }
 
@@ -63,7 +92,8 @@ export async function getSession() {
 }
 
 export async function signInWithGoogle() {
-    const result = await signInWithPopup(auth, googleProvider);
+    const { auth: firebaseAuth } = getFirebase();
+    const result = await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
     const profile = await getUserProfile(result.user.uid);
 
     return {
@@ -73,7 +103,12 @@ export async function signInWithGoogle() {
 }
 
 export async function signOut() {
-    await firebaseSignOut(auth);
+    if (!isConfigured()) {
+        return;
+    }
+
+    const { auth: firebaseAuth } = getFirebase();
+    await firebaseSignOut(firebaseAuth);
 }
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,16}$/;
@@ -93,11 +128,12 @@ export async function claimUsername(uid, username) {
         throw new Error(error);
     }
 
+    const { db: firestore } = getFirebase();
     const key = username.toLowerCase();
 
-    await runTransaction(db, async (transaction) => {
-        const userRef = doc(db, "users", uid);
-        const nameRef = doc(db, "usernames", key);
+    await runTransaction(firestore, async (transaction) => {
+        const userRef = doc(firestore, "users", uid);
+        const nameRef = doc(firestore, "usernames", key);
 
         const userSnap = await transaction.get(userRef);
 
