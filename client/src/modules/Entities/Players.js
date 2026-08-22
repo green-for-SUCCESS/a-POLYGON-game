@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { HomeScene } from "../Game.js";
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { variable } from "../GameValues/LocalVariables.js";
