@@ -3,10 +3,13 @@
 // =====================================================
 
 import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
 import {
     getAuth,
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     signOut as firebaseSignOut,
     onAuthStateChanged
 } from "firebase/auth";
@@ -18,15 +21,19 @@ import {
     serverTimestamp
 } from "firebase/firestore";
 
-// Paste Project settings → Your apps → SDK setup and configuration here.
-// Firebase web keys are public; protect the project with Auth domains + Firestore rules.
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-    appId: import.meta.env.VITE_FIREBASE_APP_ID || ""
+  apiKey: "AIzaSyCvzct-ZRgpPee92JSq8EXjOVRrMLN0zCs",
+  authDomain: "a-polygon-game.firebaseapp.com",
+  projectId: "a-polygon-game",
+  storageBucket: "a-polygon-game.firebasestorage.app",
+  messagingSenderId: "1048084235974",
+  appId: "1:1048084235974:web:380d9434a7c189610df9c7",
+  measurementId: "G-YPVHREB7BG"
 };
 
 let app = null;
@@ -76,7 +83,24 @@ export async function getUserProfile(uid) {
     return snap.exists() ? snap.data() : null;
 }
 
+let redirectResultChecked = false;
+
+function usesRedirectSignIn() {
+    const { hostname } = window.location;
+    return hostname !== "localhost" && hostname !== "127.0.0.1";
+}
+
 export async function getSession() {
+    if (!redirectResultChecked) {
+        redirectResultChecked = true;
+
+        try {
+            const { auth: firebaseAuth } = getFirebase();
+            await getRedirectResult(firebaseAuth);
+        } catch {
+        }
+    }
+
     const user = await waitForAuth();
 
     if (!user) {
@@ -93,7 +117,15 @@ export async function getSession() {
 
 export async function signInWithGoogle() {
     const { auth: firebaseAuth } = getFirebase();
-    const result = await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
+    const provider = new GoogleAuthProvider();
+
+    // GitHub Pages sends COOP: same-origin, which breaks popup polling.
+    if (usesRedirectSignIn()) {
+        await signInWithRedirect(firebaseAuth, provider);
+        return { user: null, username: null, redirecting: true };
+    }
+
+    const result = await signInWithPopup(firebaseAuth, provider);
     const profile = await getUserProfile(result.user.uid);
 
     return {
@@ -111,11 +143,17 @@ export async function signOut() {
     await firebaseSignOut(firebaseAuth);
 }
 
-const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,16}$/;
-
 export function validateUsername(username) {
-    if (!USERNAME_PATTERN.test(username)) {
-        return "Username must be 3-16 letters, numbers, or underscores.";
+    if (!username) {
+        return "Please enter a username.";
+    }
+
+    if (/\s/.test(username) || !/^[a-zA-Z0-9._-]+$/.test(username)) {
+        return "Username can only use letters, numbers, periods, hyphens, and underscores.";
+    }
+
+    if (username.length < 3 || username.length > 16) {
+        return "Username must be 3-16 characters.";
     }
 
     return null;

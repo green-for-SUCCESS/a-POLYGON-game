@@ -1,7 +1,7 @@
 // =========================================================
 // ALL THE BORING STUFF
 // =========================================================
-import "./modules/Multiplayer/FirebaseInit.js";
+import "./modules/Multiplayer/FirebaseConfig.js";
 import { connect } from "./modules/Multiplayer/Network.js";
 
 window.addEventListener('load', async () => {

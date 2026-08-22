@@ -3,7 +3,7 @@ import {
     getSession,
     claimUsername,
     validateUsername
-} from "../Multiplayer/FirebaseInit.js";
+} from "../Multiplayer/FirebaseConfig.js";
 
 // =====================================================
 // LOGIN SCREEN
@@ -292,6 +292,10 @@ export function createLogin() {
                 try {
                     const session = await signInWithGoogle();
 
+                    if (session.redirecting) {
+                        return;
+                    }
+
                     if (!session.username) {
                         showUsernameForm(session.user);
                         return;
@@ -302,7 +306,11 @@ export function createLogin() {
                 } catch (error) {
                     busy = false;
                     status.setColor("#ff6666");
-                    status.setText(error.message || "Google sign-in failed.");
+                    if (error.code === "auth/popup-closed-by-user") {
+                        status.setText("Login cancelled.");
+                    } else {
+                        status.setText(error.message || "Google sign-in failed.");
+                    }
                 }
             }
         );

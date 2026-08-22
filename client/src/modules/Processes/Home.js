@@ -1,4 +1,4 @@
-import { getSession, signOut } from "../Multiplayer/FirebaseInit.js";
+import { getSession, signOut } from "../Multiplayer/FirebaseConfig.js";
 
 // =====================================================
 // HOME SCREEN
@@ -35,7 +35,7 @@ export function createHome(session) {
 
     const titleMiddle = this.add.text(
         titleX,
-        height * 0.345,
+        titleTop.y + 64,
         "about",
         {
             fontSize: "38px",
@@ -50,7 +50,7 @@ export function createHome(session) {
 
     const titleBottom = this.add.text(
         titleX,
-        height * 0.405,
+        titleMiddle.y + 72,
         "POLYGONS",
         {
             fontSize: "110px",
@@ -67,26 +67,26 @@ export function createHome(session) {
     // ACCOUNT (CORNER)
     // =================================================
 
+    const pad = 24;
+    const logoutW = 140;
+    const logoutH = 40;
+    const logoutX = width - pad - logoutW;
+    const logoutY = pad;
+
+    const statusText = this.add.text(
+        isLoggedIn ? logoutX - 16 : width - pad,
+        logoutY + logoutH / 2,
+        isLoggedIn ? `Signed in as: ${session.username}` : "Signed out",
+        {
+            fontSize: "22px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff"
+        }
+    );
+
+    statusText.setOrigin(1, 0.5);
+
     if (isLoggedIn) {
-
-        const pad = 24;
-        const logoutW = 140;
-        const logoutH = 40;
-        const logoutX = width - pad - logoutW;
-        const logoutY = pad;
-
-        const usernameText = this.add.text(
-            logoutX - 16,
-            logoutY + logoutH / 2,
-            session.username,
-            {
-                fontSize: "22px",
-                fontFamily: "Ubuntu",
-                color: "#ffffff"
-            }
-        );
-
-        usernameText.setOrigin(1, 0.5);
 
         const logoutBg = this.add.graphics();
 
@@ -116,7 +116,7 @@ export function createHome(session) {
         const logoutText = this.add.text(
             logoutX + logoutW / 2,
             logoutY + logoutH / 2,
-            "LOG OUT",
+            "LOGOUT",
             {
                 fontSize: "18px",
                 fontFamily: "Ubuntu",
@@ -145,10 +145,10 @@ export function createHome(session) {
     // PLAY / LOGIN BUTTON
     // =================================================
 
-    const btnW = 300;
+    const btnW = isLoggedIn ? 200 : 250;
     const btnH = 70;
     const btnX = width / 2 - btnW / 2;
-    const btnY = height * 0.55;
+    const btnY = height * 0.7;
     const btnRadius = 20;
 
     const btnBg = this.add.graphics();
@@ -198,7 +198,7 @@ export function createHome(session) {
         btnY + btnH / 2,
         isLoggedIn ? "PLAY" : "LOGIN TO PLAY",
         {
-            fontSize: "28px",
+            fontSize: isLoggedIn ?"42px" : "28px",
             fontFamily: "Ubuntu",
             color: "#ffffff"
         }
@@ -233,6 +233,11 @@ export async function loadHome() {
         session = await getSession();
     } catch (error) {
         console.error(error);
+    }
+
+    if (session.user && !session.username) {
+        this.scene.start("LoginScene");
+        return;
     }
 
     createHome.call(this, session);
