@@ -389,7 +389,7 @@ export function showDeathScreen() {
 
     // BUTTON SETTINGS
 
-    const btnW = 260;
+    const btnW = 300;
     const btnH = 80;
     const btnRadius = 20;
     const btnGap = 20;
@@ -554,8 +554,7 @@ export function showDeathScreen() {
             variable.room = null;
         }
 
-        // Change "Menu" if your actual menu scene has a different name.
-        scene.scene.start("Menu");
+        scene.scene.start("HomeScene");
     });
 
     // SAVE REFERENCES
