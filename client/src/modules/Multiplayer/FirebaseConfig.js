@@ -8,6 +8,7 @@ import {
     getAuth,
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithRedirect,
     getRedirectResult,
     signOut as firebaseSignOut,
     onAuthStateChanged
@@ -120,7 +121,7 @@ export async function signInWithGoogle() {
 
     // GitHub Pages sends COOP: same-origin, which breaks popup polling.
     if (usesRedirectSignIn()) {
-        await signInWithPopup(firebaseAuth, provider);
+        await signInWithRedirect(firebaseAuth, provider);
         return { user: null, username: null, redirecting: true };
     }
 
