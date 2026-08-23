@@ -9,6 +9,7 @@ import { create } from "./Processes/Create.js";
 import { update } from "./Processes/Update.js";
 import { loadHome } from "./Processes/Home.js";
 import { createLogin } from "./Processes/Login.js";
+import { variable } from "./GameValues/LocalVariables.js";
 
 class LoginScene extends Phaser.Scene {
 
@@ -40,7 +41,10 @@ class GameScene extends Phaser.Scene {
         preload.call(this);
     }
 
-    create() {
+    create(data) {
+        if (data?.username) {
+            variable.username = data.username;
+        }
         create.call(this);
     }
 

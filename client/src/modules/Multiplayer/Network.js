@@ -3,7 +3,8 @@ import { Callbacks } from "@colyseus/sdk";
 
 import { variable } from "../GameValues/LocalVariables.js";
 
-import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar } from "../Entities/Players.js";
+import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
+import { getSession } from "./FirebaseConfig.js";
 import { createRemoteEnemy, removeRemoteEnemy, updateRemoteEnemy } from "../Entities/Enemies.js";
 import { shatterAt } from "../Entities/Effects.js";
 import { applyKnockback } from "../Logic/Physics.js";
@@ -13,7 +14,15 @@ export const client = new Colyseus.Client("https://a-polygon-game.onrender.com")
 
 export async function connect() {
     try {
-        const room = await client.joinOrCreate("battle");
+        let name = "";
+        try {
+            const session = await getSession();
+            name = session?.username ?? "";
+        } catch {
+            name = "";
+        }
+
+        const room = await client.joinOrCreate("battle", { name });
 
         console.log("✅ Connected!");
         console.log("Room:", room.roomId);
@@ -39,13 +48,33 @@ export async function connect() {
         callbacks.onAdd("players", (playerState, sessionId) => {
             // Spawns local or remote player based on sessionId match
             const p = createPlayer(sessionId, playerState.x, playerState.y);
+
+            if (!p.isLocal) {
+                setRemotePlayerName(p, playerState.name);
+                if (playerState.health <= 0) {
+                    p.sprite.setVisible(false);
+                    p.dead = true;
+                }
+            }
         
             callbacks.onChange(playerState, () => {
                 const isLocal = sessionId === variable.playerId;
+                const remote = variable.allPlayers[sessionId];
 
-                if (!isLocal && variable.allPlayers[sessionId]) {
-                    variable.allPlayers[sessionId].targetX = playerState.x;
-                    variable.allPlayers[sessionId].targetY = playerState.y;
+                if (!isLocal && remote) {
+                    remote.targetX = playerState.x;
+                    remote.targetY = playerState.y;
+                    setRemotePlayerName(remote, playerState.name);
+
+                    const prevHealth = remote.health;
+                    const nextHealth = playerState.health;
+                    setRemotePlayerHealth(remote, nextHealth);
+
+                    if (prevHealth > 0 && nextHealth <= 0) {
+                        killRemotePlayer(remote);
+                    } else if (prevHealth <= 0 && nextHealth > 0) {
+                        reviveRemotePlayer(remote);
+                    }
                 }
 
                 if (isLocal) {
@@ -69,13 +98,7 @@ export async function connect() {
         callbacks.onRemove("players", (player, sessionId) => {
             console.log("Player left:", sessionId);
 
-            if (variable.allPlayers[sessionId]) {
-                // Destroy the visual sprite in Phaser
-                variable.allPlayers[sessionId].sprite.destroy();
-                
-                // Remove from local reference
-                delete variable.allPlayers[sessionId];
-            }
+            destroyPlayer(sessionId);
         });
 
         callbacks.onAdd("enemies", (enemyState, enemyId) => {

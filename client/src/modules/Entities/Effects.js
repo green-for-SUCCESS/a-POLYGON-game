@@ -8,7 +8,7 @@ import { variable } from "../GameValues/LocalVariables.js";
 // vx / vy are the velocity of the object that died, used to
 // add momentum to the chunks.
 // =====================================================
-export function shatterAt(x, y, vx, vy, textureKey) {
+export function shatterAt(x, y, vx, vy, textureKey, tint) {
     if (!variable.sceneRef) return;
 
     const pixelSize = 5;
@@ -27,6 +27,10 @@ export function shatterAt(x, y, vx, vy, textureKey) {
             );
 
             pixel.setDisplaySize(pixelSize, pixelSize);
+
+            if (tint != null) {
+                pixel.setTint(tint);
+            }
 
             const dirX = (px - piecesPerRow / 2) * Phaser.Math.FloatBetween(30, 70);
             const dirY = (py - piecesPerRow / 2) * Phaser.Math.FloatBetween(20, 45);

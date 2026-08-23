@@ -6,12 +6,16 @@ import Phaser from "phaser";
 import { blockWidth, blockHeight, allBlocks, groundBlocks, stoneObjects, spikePositions } from "../../../../shared-data/Environment.js";
 import { SETTINGS, ENEMY_STATE } from "../../../../shared-data/Constants.js";
 import { variable } from "../GameValues/LocalVariables.js";
-import { playerMovementCheck } from "../Entities/Players.js";
+import { playerMovementCheck, updateRemotePlayers } from "../Entities/Players.js";
 
 export function update() {
 
     if (SETTINGS.DEBUG_ENEMY_ATTACKS) {
         this.enemyDebugGraphics.clear();
+    }
+
+    if (variable.room) {
+        updateRemotePlayers();
     }
 
     if (!variable.player || !variable.player.body || !variable.room) {
@@ -47,15 +51,6 @@ export function update() {
             y: variable.player.y,
             isFastFalling: !!variable.player.isFastFalling,
         });
-    }
-
-    // 3. Update remote player sprite positions
-    for (let id in variable.allPlayers) {
-        const p = variable.allPlayers[id];
-        if (!p.isLocal) {
-            // Direct positioning based on latest server coordinates
-            p.sprite.setPosition(p.targetX, p.targetY);
-        }
     }
 
     // Enemy spawn is handled server-side in HeadlessGame

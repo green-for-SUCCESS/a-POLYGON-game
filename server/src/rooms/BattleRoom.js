@@ -92,11 +92,12 @@ export class BattleRoom extends Room {
         this.game.syncEnemiesTo(this.state.enemies);
     }
 
-    onJoin(client) {
+    onJoin(client, options) {
         const player = new PlayerState();
 
         player.x = 100;
         player.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
+        player.name = sanitizePlayerName(options?.username || options?.name);
 
         this.state.players.set(client.sessionId, player);
 
@@ -112,4 +113,14 @@ export class BattleRoom extends Room {
     onDispose() {
         console.log("room", this.roomId, "disposing...");
     }
+}
+
+function sanitizePlayerName(raw) {
+    const name = typeof raw === "string" ? raw.trim() : "";
+
+    if (!/^[a-zA-Z0-9._-]{3,16}$/.test(name)) {
+        return "Player";
+    }
+
+    return name;
 }

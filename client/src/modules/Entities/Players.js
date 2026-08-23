@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { variable } from "../GameValues/LocalVariables.js";
+import { shatterAt } from "./Effects.js";
 
 // =====================================================
 // CREATE PLAYER
@@ -25,7 +26,9 @@ export function createPlayer(id, x, y,) {
         id,
         sprite,
         health: SETTINGS.PLAYER_MAX_HEALTH,
-        isLocal
+        isLocal,
+        targetX: x,
+        targetY: y
     };
 
     variable.allPlayers[id] = player;
@@ -33,6 +36,7 @@ export function createPlayer(id, x, y,) {
     // Temporary compatibility with your existing code.
     // You'll remove variable.sceneRef once everything uses allPlayers.
     if (isLocal) {
+        sprite.setTint(0x1e90ff);
         variable.player = sprite;
         variable.playerHealth = SETTINGS.PLAYER_MAX_HEALTH;
         variable.myId = id;
@@ -102,11 +106,191 @@ export function createPlayer(id, x, y,) {
     } else {
         // REMOTE PLAYER: Completely disable physics body calculations
         // This stops gravity, collisions, and velocity acceleration on remote clients
-        sprite.body.enable = false; 
+        sprite.setTint(0x00ff00)
+        sprite.body.enable = false;
+        createRemotePlayerHud(player);
     }
     
 
     return player;
+}
+
+const REMOTE_HP_BAR_WIDTH = 42;
+const REMOTE_HP_BAR_HEIGHT = 5;
+const REMOTE_HP_BAR_GAP = 6;
+const REMOTE_NAME_GAP = 3;
+
+function createRemotePlayerHud(player) {
+    const scene = variable.sceneRef;
+
+    const nameTag = scene.add.text(
+        player.sprite.x,
+        player.sprite.y,
+        "Player",
+        {
+            fontSize: "12px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 3
+        }
+    );
+    nameTag.setOrigin(0.5, 1);
+    nameTag.setDepth(1002);
+
+    const hpBg = scene.add.rectangle(
+        player.sprite.x,
+        player.sprite.y,
+        REMOTE_HP_BAR_WIDTH,
+        REMOTE_HP_BAR_HEIGHT,
+        0x222222
+    );
+    hpBg.setOrigin(0.5, 0.5);
+    hpBg.setDepth(1001);
+
+    const hpFill = scene.add.rectangle(
+        player.sprite.x - REMOTE_HP_BAR_WIDTH / 2,
+        player.sprite.y,
+        REMOTE_HP_BAR_WIDTH,
+        REMOTE_HP_BAR_HEIGHT,
+        0x00ff00
+    );
+    hpFill.setOrigin(0, 0.5);
+    hpFill.setDepth(1002);
+
+    player.nameTag = nameTag;
+    player.hpBg = hpBg;
+    player.hpFill = hpFill;
+
+    layoutRemotePlayerHud(player);
+    updateRemotePlayerHealthBar(player);
+}
+
+function layoutRemotePlayerHud(player) {
+    if (!player.nameTag) {
+        return;
+    }
+
+    const x = player.sprite.x;
+    const top = player.sprite.y - SETTINGS.PLAYER_SIZE / 2;
+    const barY = top - REMOTE_HP_BAR_GAP - REMOTE_HP_BAR_HEIGHT / 2;
+
+    player.hpBg.setPosition(x, barY);
+    player.hpFill.setPosition(x - REMOTE_HP_BAR_WIDTH / 2, barY);
+    player.nameTag.setPosition(
+        x,
+        barY - REMOTE_HP_BAR_HEIGHT / 2 - REMOTE_NAME_GAP
+    );
+}
+
+export function setRemotePlayerName(player, name) {
+    if (!player?.nameTag) {
+        return;
+    }
+
+    const label =
+        typeof name === "string" && name.trim()
+            ? name.trim()
+            : "Player";
+
+    player.nameTag.setText(label);
+}
+
+export function setRemotePlayerHealth(player, health) {
+    if (!player) {
+        return;
+    }
+
+    player.health = health;
+    updateRemotePlayerHealthBar(player);
+}
+
+export function killRemotePlayer(player) {
+    if (!player?.sprite || player.dead) {
+        return;
+    }
+
+    player.dead = true;
+
+    const x = player.targetX ?? player.sprite.x;
+    const y = player.targetY ?? player.sprite.y;
+    player.sprite.setPosition(x, y);
+    player.sprite.setVisible(false);
+    player.nameTag?.setVisible(false);
+    player.hpBg?.setVisible(false);
+    player.hpFill?.setVisible(false);
+
+    shatterAt(
+        x,
+        y,
+        0,
+        0,
+        "player",
+        0x00ff00
+    );
+}
+
+export function reviveRemotePlayer(player) {
+    if (!player?.sprite) {
+        return;
+    }
+
+    player.dead = false;
+    player.sprite.setVisible(true);
+    updateRemotePlayerHealthBar(player);
+}
+
+function updateRemotePlayerHealthBar(player) {
+    if (!player.hpFill) {
+        return;
+    }
+
+    const percent = Phaser.Math.Clamp(
+        player.health / SETTINGS.PLAYER_MAX_HEALTH,
+        0,
+        1
+    );
+
+    player.hpFill.width = REMOTE_HP_BAR_WIDTH * percent;
+    player.hpFill.setFillStyle(
+        percent > 0.5 ? 0x00ff00 : percent > 0.25 ? 0xffff00 : 0xff0000
+    );
+
+    const visible = player.health > 0;
+    player.nameTag.setVisible(visible);
+    player.hpBg.setVisible(visible);
+    player.hpFill.setVisible(visible);
+}
+
+export function updateRemotePlayers() {
+    for (const id in variable.allPlayers) {
+        const player = variable.allPlayers[id];
+        if (player.isLocal) {
+            continue;
+        }
+
+        if (player.targetX != null && player.targetY != null) {
+            player.sprite.setPosition(player.targetX, player.targetY);
+        }
+
+        if (!player.dead) {
+            layoutRemotePlayerHud(player);
+        }
+    }
+}
+
+export function destroyPlayer(id) {
+    const player = variable.allPlayers[id];
+    if (!player) {
+        return;
+    }
+
+    player.sprite.destroy();
+    player.nameTag?.destroy();
+    player.hpBg?.destroy();
+    player.hpFill?.destroy();
+
+    delete variable.allPlayers[id];
 }
 
 // =================================================
@@ -270,6 +454,10 @@ export function shatterPlayer() {
                     startY + py * pixelSize,
                     'player'
                 );
+
+                pixel.setTint(
+                    variable.player.tint
+                )
             
                 pixel.setDisplaySize(
                 pixelSize,

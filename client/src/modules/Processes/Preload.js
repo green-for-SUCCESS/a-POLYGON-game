@@ -15,7 +15,7 @@ export function preload() {
 
     const p = this.add.graphics();
 
-    p.fillStyle(0x00ff00, 1);
+    p.fillStyle(0xffffff, 1);
 
     p.fillRect(
         0,
