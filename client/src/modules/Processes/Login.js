@@ -351,7 +351,6 @@ export function createLogin() {
             }
         })
         .catch((error) => {
-            console.error(error);
         });
 
     this.events.once("shutdown", clearUi);

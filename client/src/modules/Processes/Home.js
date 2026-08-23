@@ -232,7 +232,6 @@ export async function loadHome() {
     try {
         session = await getSession();
     } catch (error) {
-        console.error(error);
     }
 
     if (session.user && !session.username) {
