@@ -248,15 +248,6 @@ export function createLogin() {
             }
         );
 
-        createButton(
-            firstY + (btnH + btnGap) * 2,
-            "BACK",
-            () => {
-                clearUi();
-                scene.scene.start("Home");
-            }
-        );
-
         input.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
                 submitUsername();
