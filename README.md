@@ -1,4 +1,4 @@
-# stability-platformer-wip
+# a-POLYGON-game
 Work in progress game. Enjoy!
 
 Controls:
@@ -7,12 +7,12 @@ Controls:
 - S: Fast-fall
 
 How to play:
-- Get across the platforms, avoid spikes, kill enemies, and reach checkpoints!
+- Just kill enemies and have fun with other players!
 - Enemies can be killed when the player touches the enemy while in fast-fall mode.
 
 This is an unfinished game. I will be adding:
-- Player, enemy, and checkpoint textures.
-- Expanded levels and even more levels.
+- A PVP room
+- Player & enemy textures.
 - WAY wilder combat mechanics!
 - A crap ton of animations.
 
