@@ -52,11 +52,11 @@ export const SETTINGS = {
 
     // ---------------- ENEMY STATS ----------------
     ENEMY_BASE_HEALTH: 22,
-    ENEMY_HEALTH_GROWTH: 2.6,
+    ENEMY_HEALTH_GROWTH: 8,
     ENEMY_BASE_DAMAGE: 6,
-    ENEMY_DAMAGE_GROWTH: 2.15,
-    ENEMY_BASE_XP: 8,
-    ENEMY_XP_GROWTH: 2.2,
+    ENEMY_DAMAGE_GROWTH: 8,
+    ENEMY_BASE_XP: 2,
+    ENEMY_XP_GROWTH: 4,
 
     // ---------------- SPAWNING ----------------
     MAX_ENEMIES: 300,
@@ -85,10 +85,10 @@ export const SETTINGS = {
     LEVEL_XP_BASE: 100,
     LEVEL_XP_GROWTH: 1.25,
 
-    PLAYER_BASE_MAX_HEALTH: 40,
-    PLAYER_HEALTH_GROWTH: 1.12,
-    PLAYER_BASE_DAMAGE: 5,
-    PLAYER_DAMAGE_GROWTH: 1.15,
+    PLAYER_BASE_MAX_HEALTH: 20,
+    PLAYER_HEALTH_GROWTH: 1.05,
+    PLAYER_BASE_DAMAGE: 2,
+    PLAYER_DAMAGE_GROWTH: 1.05,
 
     // ---------------- FASTFALL ----------------
     PLAYER_FASTFALL_DAMAGE: 16,
