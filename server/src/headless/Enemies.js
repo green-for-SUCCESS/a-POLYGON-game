@@ -1,29 +1,29 @@
 import Body from "../../node_modules/phaser/src/physics/arcade/Body.js";
 
 import { SETTINGS, ENEMY_STATE } from "../../../shared-data/Constants.js";
-import { getEnemyRadius } from "../../../shared-data/Geometry.js";
+import { getEnemyBodyMetrics } from "../../../shared-data/Geometry.js";
 
 function enemyCenterX(enemy) {
-    return enemy.x + enemy.radius;
+    return enemy.x + enemy.width / 2;
 }
 
 function enemyCenterY(enemy) {
-    return enemy.y + enemy.radius;
+    return enemy.y + enemy.height / 2;
 }
 
 export function createEnemy(world, { x, rarity, stats }) {
-    const radius = getEnemyRadius(rarity);
-    const size = radius * 2;
+    const metrics = getEnemyBodyMetrics(rarity);
     const enemy = new Body(world);
 
-    enemy.x = x - radius;
-    enemy.y = SETTINGS.ENTITY_SPAWN_HEIGHT - radius;
-    enemy.setSize(size, size, false);
+    enemy.x = x - metrics.width / 2;
+    enemy.y = SETTINGS.ENTITY_SPAWN_HEIGHT - metrics.height / 2;
+    enemy.setSize(metrics.width, metrics.height, false);
 
     world.add(enemy);
 
     enemy.rarity = rarity;
-    enemy.radius = radius;
+    enemy.radius = metrics.radius;
+    enemy.apothem = metrics.apothem;
     enemy.health = stats.health;
     enemy.maxHealth = stats.health;
     enemy.damage = stats.damage;

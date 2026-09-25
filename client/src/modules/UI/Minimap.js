@@ -80,19 +80,19 @@ export function drawMinimap() {
     graphics.fillStyle(0xffffff, 1);
     graphics.lineStyle(1, 0x000000, 1);
     graphics.fillTriangle(
-        markerX - 6,
-        TOP + HEIGHT + 2,
-        markerX + 6,
-        TOP + HEIGHT + 2,
         markerX,
+        TOP + HEIGHT + 2,
+        markerX - 6,
+        TOP + HEIGHT + 14,
+        markerX + 6,
         TOP + HEIGHT + 14
     );
     graphics.strokeTriangle(
-        markerX - 6,
-        TOP + HEIGHT + 2,
-        markerX + 6,
-        TOP + HEIGHT + 2,
         markerX,
+        TOP + HEIGHT + 2,
+        markerX - 6,
+        TOP + HEIGHT + 14,
+        markerX + 6,
         TOP + HEIGHT + 14
     );
 }
