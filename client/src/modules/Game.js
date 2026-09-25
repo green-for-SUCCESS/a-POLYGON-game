@@ -45,6 +45,9 @@ class GameScene extends Phaser.Scene {
         if (data?.username) {
             variable.username = data.username;
         }
+        if (data?.xp != null) {
+            variable.persistentXP = data.xp;
+        }
         create.call(this);
     }
 

@@ -3,10 +3,8 @@ import { Callbacks } from "@colyseus/sdk";
 
 import { variable } from "../GameValues/LocalVariables.js";
 
-import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
-import { getSession } from "./FirebaseConfig.js";
-import { createRemoteEnemy, removeRemoteEnemy, updateRemoteEnemy } from "../Entities/Enemies.js";
-import { shatterAt } from "../Entities/Effects.js";
+import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
+import { getSession, persistXP } from "./FirebaseConfig.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 
@@ -14,15 +12,23 @@ export const client = new Colyseus.Client("https://a-polygon-game.onrender.com")
 
 export async function connect() {
     try {
-        let name = "";
+        let username = variable.username || "";
+        let xp = variable.persistentXP || 0;
+
         try {
             const session = await getSession();
-            name = session?.username ?? "";
+            if (session?.username) {
+                username = session.username;
+                variable.username = session.username;
+            }
+            if (session?.xp != null) {
+                xp = session.xp;
+                variable.persistentXP = session.xp;
+            }
         } catch {
-            name = "";
         }
 
-        const room = await client.joinOrCreate("battle", { name });
+        const room = await client.joinOrCreate("battle", { username, xp });
 
         console.log("✅ Connected!");
         console.log("Room:", room.roomId);
@@ -43,14 +49,24 @@ export async function connect() {
             );
         });
 
+        room.onMessage("persistXP", (data) => {
+            const nextXP = Math.max(0, Math.floor(Number(data?.xp) || 0));
+            variable.persistentXP = nextXP;
+            variable.runXP = 0;
+            updateProgressHud();
+            persistXP(nextXP).catch(() => {});
+        });
+
         const callbacks = Callbacks.get(room);
 
         callbacks.onAdd("players", (playerState, sessionId) => {
-            // Spawns local or remote player based on sessionId match
             const p = createPlayer(sessionId, playerState.x, playerState.y);
 
-            if (!p.isLocal) {
+            if (p.isLocal) {
+                applyLocalPlayerState(playerState);
+            } else {
                 setRemotePlayerName(p, playerState.name);
+                setRemotePlayerHealth(p, playerState.health);
                 if (playerState.health <= 0) {
                     p.sprite.setVisible(false);
                     p.dead = true;
@@ -81,14 +97,13 @@ export async function connect() {
                     const prev = variable.playerHealth;
                     const next = playerState.health;
 
+                    applyLocalPlayerState(playerState);
                     variable.playerHealth = next;
                     updateHealthBar();
 
                     if (prev > 0 && next <= 0) {
-                        // Server killed us — shatter + death screen (manual respawn)
                         shatterPlayer();
                     } else if (prev <= 0 && next > 0) {
-                        // Player chose respawn from the death screen
                         respawnPlayer({ immediate: true });
                     }
                 }
@@ -97,27 +112,7 @@ export async function connect() {
 
         callbacks.onRemove("players", (player, sessionId) => {
             console.log("Player left:", sessionId);
-
             destroyPlayer(sessionId);
-        });
-
-        callbacks.onAdd("enemies", (enemyState, enemyId) => {
-            createRemoteEnemy(enemyId, enemyState.x, enemyState.y);
-
-            callbacks.onChange(enemyState, () => {
-                updateRemoteEnemy(enemyId, enemyState.x, enemyState.y, enemyState.state);
-            });
-        });
-
-        callbacks.onRemove("enemies", (enemyState, enemyId) => {
-            shatterAt(
-                enemyState.x,
-                enemyState.y,
-                enemyState.velocityX ?? 0,
-                enemyState.velocityY ?? 0,
-                "enemy"
-            );
-            removeRemoteEnemy(enemyId);
         });
         
         return room;
@@ -128,4 +123,18 @@ export async function connect() {
             console.log("Server response:", e.data);
         }
     }
+}
+
+function applyLocalPlayerState(playerState) {
+    if (playerState.maxHealth) {
+        variable.playerMaxHealth = playerState.maxHealth;
+    }
+
+    if (playerState.xp != null) {
+        variable.persistentXP = playerState.xp;
+    }
+
+    variable.runXP = playerState.runXP ?? 0;
+    variable.spawnExited = !!playerState.spawnExited;
+    updateProgressHud();
 }

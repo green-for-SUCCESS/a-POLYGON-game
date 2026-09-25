@@ -30,11 +30,38 @@ export const SETTINGS = {
     SPIKE_DAMAGE: 50,
     SPIKE_KNOCKBACK: 4000,
 
-    // ---------------- SPAWNING ----------------
-    ENEMY_SPAWN_CHANCE: 1,   // 100% chance every second
-    MAX_ENEMIES: 200,
+    // ---------------- ZONES ----------------
+    SPAWN_ZONE_WIDTH: 500,
 
-    // ---------------- ENEMY ----------------
+    ZONE_PEACEFUL_CAP: 20,
+    ZONE_PEACEFUL_SPAWN_CHANCE: 0.10,
+
+    ZONE_RESTLESS_CAP: 50,
+    ZONE_RESTLESS_SPAWN_CHANCE: 0.25,
+
+    ZONE_CHAOTIC_CAP: 100,
+    ZONE_CHAOTIC_SPAWN_CHANCE: 0.50,
+
+    ZONE_ANARCHIC_CAP: 100,
+    ZONE_ANARCHIC_SPAWN_CHANCE: 0.80,
+
+    // ---------------- ENEMY RARITY / SHAPE ----------------
+    ENEMY_RARITY_MAX: 4,
+    ENEMY_RARITY_UPGRADE_CHANCE: 0.25,
+    ENEMY_SIDE_LENGTH: 36,
+
+    // ---------------- ENEMY STATS ----------------
+    ENEMY_BASE_HEALTH: 20,
+    ENEMY_HEALTH_GROWTH: 1.75,
+    ENEMY_BASE_DAMAGE: 8,
+    ENEMY_DAMAGE_GROWTH: 1.45,
+    ENEMY_BASE_XP: 6,
+    ENEMY_XP_GROWTH: 2,
+
+    // ---------------- SPAWNING ----------------
+    MAX_ENEMIES: 300,
+
+    // ---------------- ENEMY AI ----------------
     ENEMY_PATROL_SPEED: 200,
     ENEMY_CHASE_SPEED_MULT: 4,
 
@@ -51,9 +78,25 @@ export const SETTINGS = {
     ENEMY_ATTACK_SWEEP: 90,      // degrees
     ENEMY_ATTACK_DELAY: 100,     // ms
     ENEMY_ATTACK_COOLDOWN: 300, // ms
-    ENEMY_ATTACK_DAMAGE: 20,
     ENEMY_ATTACK_DURATION: 150,
     ENEMY_KNOCKBACK: 1000,
+
+    // ---------------- PLAYER PROGRESSION ----------------
+    LEVEL_XP_BASE: 100,
+    LEVEL_XP_GROWTH: 1.25,
+
+    PLAYER_BASE_MAX_HEALTH: 100,
+    PLAYER_HEALTH_GROWTH: 1.08,
+    PLAYER_BASE_DAMAGE: 12,
+    PLAYER_DAMAGE_GROWTH: 1.1,
+
+    // ---------------- FASTFALL ----------------
+    PLAYER_FASTFALL_DAMAGE: 45,
+    PLAYER_FASTFALL_DAMAGE_GROWTH: 1.12,
+    PLAYER_FASTFALL_RADIUS: 180,
+    PLAYER_FASTFALL_KNOCKBACK: 900,
+    PLAYER_FASTFALL_KNOCKBACK_GROWTH: 1.08,
+    PLAYER_FASTFALL_STUN: 500,
 
     // ---------------- CHECKPOINT ----------------
     CHECKPOINT_SIZE: 32,
@@ -69,7 +112,7 @@ export const SETTINGS = {
     // ---------------- TEXTURE SCALE ----------------
     BLOCK_SCALE: 0.0625,
 
-    // ---------------- HEALTH ----------------
+    // ---------------- HEALTH (legacy alias) ----------------
     PLAYER_MAX_HEALTH: 100,
     PLAYER_DAMAGE_COOLDOWN: 1000,
 
@@ -83,3 +126,11 @@ export const ENEMY_STATE = {
     ATTACK: 2,
     COOLDOWN: 3
 };
+
+export const ENEMY_RARITY_COLORS = [
+    0xff4444,
+    0xffaa33,
+    0x44dd66,
+    0x4488ff,
+    0xcc55ff,
+];

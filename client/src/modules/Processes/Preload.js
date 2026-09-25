@@ -2,7 +2,8 @@
 // PRELOAD
 // =====================================================
 
-import { SETTINGS } from "../../../../shared-data/Constants.js";
+import { SETTINGS, ENEMY_RARITY_COLORS } from "../../../../shared-data/Constants.js";
+import { getEnemySides, getEnemyRadius, getRegularPolygonPoints } from "../../../../shared-data/Geometry.js";
 
 export function preload() {
     const base = import.meta.env.BASE_URL;
@@ -32,26 +33,24 @@ export function preload() {
 
     p.destroy();
 
-    // ENEMY
+    for (let rarity = 0; rarity <= SETTINGS.ENEMY_RARITY_MAX; rarity++) {
+        const sides = getEnemySides(rarity);
+        const radius = getEnemyRadius(rarity);
+        const size = Math.ceil(radius * 2) + 4;
+        const g = this.add.graphics();
+        const points = getRegularPolygonPoints(size / 2, size / 2, sides, radius);
 
-    const e = this.add.graphics();
-
-    e.fillStyle(0xff0000, 1);
-
-    e.fillRect(
-        0,
-        0,
-        SETTINGS.PLAYER_SIZE,
-        SETTINGS.PLAYER_SIZE
-    );
-
-    e.generateTexture(
-        'enemy',
-        SETTINGS.PLAYER_SIZE,
-        SETTINGS.PLAYER_SIZE
-    );
-
-    e.destroy();
+        g.fillStyle(ENEMY_RARITY_COLORS[rarity], 1);
+        g.beginPath();
+        g.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            g.lineTo(points[i].x, points[i].y);
+        }
+        g.closePath();
+        g.fillPath();
+        g.generateTexture(`enemy-${rarity}`, size, size);
+        g.destroy();
+    }
 
     // CHECKPOINT WHITE
 

@@ -2,20 +2,22 @@
 // UPDATE
 // =====================================================
 
-import Phaser from "phaser";
-import { blockWidth, blockHeight, allBlocks, groundBlocks, stoneObjects, spikePositions } from "../../../../shared-data/Environment.js";
-import { SETTINGS, ENEMY_STATE } from "../../../../shared-data/Constants.js";
+import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { variable } from "../GameValues/LocalVariables.js";
-import { playerMovementCheck, updateRemotePlayers } from "../Entities/Players.js";
+import { playerMovementCheck, updateRemotePlayers, enforceLocalSpawnBoundary } from "../Entities/Players.js";
+import { applyEnemySnapshot, drawEnemyDebug } from "../Entities/Enemies.js";
+import { drawMinimap } from "../UI/Minimap.js";
 
 export function update() {
 
-    if (SETTINGS.DEBUG_ENEMY_ATTACKS) {
-        this.enemyDebugGraphics.clear();
-    }
-
     if (variable.room) {
         updateRemotePlayers();
+        applyEnemySnapshot(readEnemySnapshot(variable.room.state?.enemies));
+        drawMinimap();
+    }
+
+    if (SETTINGS.DEBUG_ENEMY_ATTACKS && this.enemyDebugGraphics) {
+        drawEnemyDebug(this.enemyDebugGraphics);
     }
 
     if (!variable.player || !variable.player.body || !variable.room) {
@@ -26,10 +28,6 @@ export function update() {
         return;
     }
 
-    // =================================================
-    // SPAWN PROTECTION
-    // =================================================
-
     if (
         variable.playerSpawnProtected &&
         variable.player.body.touching.down
@@ -37,14 +35,9 @@ export function update() {
         variable.playerSpawnProtected = false;
     }
 
-    // ================================================
-    // PLAYER MOVEMENT AND SYNC
-    // ================================================
-
-    // 1. Process physics/input for local player
     playerMovementCheck();
+    enforceLocalSpawnBoundary();
 
-    // 2. Send position to server
     if (variable.player.active) {
         variable.room.send("updatePosition", {
             x: variable.player.x,
@@ -53,16 +46,37 @@ export function update() {
         });
     }
 
-    // Enemy spawn is handled server-side in HeadlessGame
-
-    // =====================================================
-    // HEALTH BAR SLIDE
-    // =====================================================
     const diff =
-    variable.healthBarTargetWidth
+        variable.healthBarTargetWidth
         - variable.healthBarDelayed.width;
-    
-    
-        variable.healthBarDelayed.width += diff * 0.08;
+
+    variable.healthBarDelayed.width += diff * 0.08;
     variable.sightGraphics.clear();
+}
+
+function readEnemySnapshot(enemies) {
+    const snapshot = [];
+    if (!enemies) {
+        return snapshot;
+    }
+
+    const length = enemies.length ?? 0;
+    for (let i = 0; i < length; i++) {
+        const enemy = enemies.at?.(i) ?? enemies[i];
+        if (!enemy) {
+            continue;
+        }
+
+        snapshot.push({
+            x: enemy.x,
+            y: enemy.y,
+            rarity: enemy.rarity ?? 0,
+            velocityX: enemy.velocityX ?? 0,
+            velocityY: enemy.velocityY ?? 0,
+            state: enemy.state ?? 0,
+            attackDirection: enemy.attackDirection ?? 0,
+        });
+    }
+
+    return snapshot;
 }

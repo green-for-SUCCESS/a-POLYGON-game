@@ -2,6 +2,8 @@ import Phaser from "phaser";
 
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
+import { getLevelFromXP, getRunXPTotal, getTotalXPForLevel } from "../../../../shared-data/Progression.js";
+import { getSpawnZoneEnd } from "../../../../shared-data/Zones.js";
 import { variable } from "../GameValues/LocalVariables.js";
 import { shatterAt } from "./Effects.js";
 
@@ -38,7 +40,8 @@ export function createPlayer(id, x, y,) {
     if (isLocal) {
         sprite.setTint(0x1e90ff);
         variable.player = sprite;
-        variable.playerHealth = SETTINGS.PLAYER_MAX_HEALTH;
+        variable.playerHealth = SETTINGS.PLAYER_BASE_MAX_HEALTH;
+        variable.playerMaxHealth = SETTINGS.PLAYER_BASE_MAX_HEALTH;
         variable.myId = id;
 
         // CAMERA
@@ -103,6 +106,7 @@ export function createPlayer(id, x, y,) {
         variable.healthBarDelayed.setDepth(3000);
     
         updateHealthBar();
+        createProgressHud();
     } else {
         // REMOTE PLAYER: Completely disable physics body calculations
         // This stops gravity, collisions, and velocity acceleration on remote clients
@@ -113,6 +117,60 @@ export function createPlayer(id, x, y,) {
     
 
     return player;
+}
+
+function createProgressHud() {
+    if (variable.xpHud) {
+        variable.xpHud.destroy();
+    }
+
+    variable.xpHud = variable.sceneRef.add.text(
+        20,
+        138,
+        "",
+        {
+            fontSize: "18px",
+            fontFamily: "Ubuntu",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 3
+        }
+    );
+    variable.xpHud.setOrigin(0, 0);
+    variable.xpHud.setScrollFactor(0);
+    variable.xpHud.setDepth(3001);
+    updateProgressHud();
+}
+
+export function updateProgressHud() {
+    if (!variable.xpHud) {
+        return;
+    }
+
+    const total = getRunXPTotal(variable.persistentXP, variable.runXP);
+    const level = getLevelFromXP(total);
+    const intoLevel = total - getTotalXPForLevel(level);
+    const span = getTotalXPForLevel(level + 1) - getTotalXPForLevel(level);
+    variable.xpHud.setText(`Lv ${level}  ${Math.floor(intoLevel)}/${Math.floor(span)} XP`);
+}
+
+export function enforceLocalSpawnBoundary() {
+    if (!variable.player) {
+        return;
+    }
+
+    const spawnEnd = getSpawnZoneEnd();
+
+    if (!variable.spawnExited && variable.player.x >= spawnEnd) {
+        variable.spawnExited = true;
+    }
+
+    if (variable.spawnExited && variable.player.x < spawnEnd) {
+        variable.player.x = spawnEnd;
+        if (variable.player.body?.velocity.x < 0) {
+            variable.player.setVelocityX(0);
+        }
+    }
 }
 
 const REMOTE_HP_BAR_WIDTH = 42;
@@ -375,9 +433,10 @@ export function playerMovementCheck() {
 // HEALTH BAR
 // =================================================
 export function updateHealthBar() {
+    const maxHealth = variable.playerMaxHealth || SETTINGS.PLAYER_BASE_MAX_HEALTH;
     const percent =
     Phaser.Math.Clamp(
-            variable.playerHealth / SETTINGS.PLAYER_MAX_HEALTH,
+            variable.playerHealth / maxHealth,
             0,
             1
         );
@@ -392,6 +451,9 @@ export function damagePlayer(amount) {
 
     if (!variable.player.active) return;
     if (variable.playerSpawnProtected) {
+        return;
+    }
+    if (!variable.spawnExited) {
         return;
     }
 
@@ -801,18 +863,8 @@ export function respawnPlayer({ immediate = false } = {}) {
 
     hideDeathScreen();
 
-    let x = SETTINGS.PLAYER_START_X;
-
-    let y = SETTINGS.ENTITY_SPAWN_HEIGHT;
-    
-    if (variable.lastCheckpoint) {
-        x = variable.lastCheckpoint.x;
-        y =
-            variable.lastCheckpoint.y
-            - SETTINGS.CHECKPOINT_SIZE / 2
-            - (SETTINGS.PLAYER_SIZE / 2)
-            - 2;
-    }
+    const x = SETTINGS.PLAYER_START_X;
+    const y = SETTINGS.ENTITY_SPAWN_HEIGHT;
 
     const delay = immediate ? 0 : SETTINGS.PLAYER_RESPAWN_DELAY;
 
@@ -838,8 +890,9 @@ export function respawnPlayer({ immediate = false } = {}) {
         );
     
         variable.playerSpawnProtected = true;
+        variable.spawnExited = false;
     
-        variable.playerHealth = SETTINGS.PLAYER_MAX_HEALTH;
+        variable.playerHealth = variable.playerMaxHealth || SETTINGS.PLAYER_BASE_MAX_HEALTH;
         updateHealthBar();
     
         variable.player.setVelocity(0, 0);

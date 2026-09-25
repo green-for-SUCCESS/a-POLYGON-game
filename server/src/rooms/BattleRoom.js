@@ -3,7 +3,6 @@ import { BattleRoomState } from "./schema/BattleRoomState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
-import { SETTINGS } from "../../../shared-data/Constants.js";
 
 export class BattleRoom extends Room {
 
@@ -14,43 +13,51 @@ export class BattleRoom extends Room {
         this.game.setPlayers(this.state.players);
 
         this.onMessage("updatePosition", (client, data) => {
-            const player = this.state.players.get(client.sessionId);
-            if (!player || player.health <= 0) {
-                return;
-            }
-
-            player.x = data.x;
-            player.y = data.y;
-            player.isFastFalling = !!data.isFastFalling;
+            this.game.applyPlayerInput(client.sessionId, data);
         });
 
         this.onMessage("suicide", (client) => {
-            const player = this.state.players.get(client.sessionId);
-            if (!player || player.health <= 0) {
-                return;
-            }
-
-            player.health = 0;
+            this.game.killPlayer(client.sessionId);
         });
 
         this.onMessage("respawn", (client) => {
-            const player = this.state.players.get(client.sessionId);
-            if (!player || player.health > 0) {
-                return;
-            }
-
-            player.health = SETTINGS.PLAYER_MAX_HEALTH;
-            player.x = SETTINGS.PLAYER_START_X;
-            player.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
-            player.isFastFalling = false;
+            this.game.respawnPlayer(client.sessionId);
         });
 
         this.setSimulationInterval((deltaTime) => {
             this.game.update(deltaTime);
-            this.game.resolveFastFallHits();
             this._syncEnemies();
             this._dispatchKnockbacks();
+            this._dispatchPersists();
         });
+    }
+
+    _syncEnemies() {
+        const snapshot = this.game.getEnemySnapshot();
+        const enemies = this.state.enemies;
+
+        while (enemies.length > snapshot.length) {
+            enemies.pop();
+        }
+
+        while (enemies.length < snapshot.length) {
+            enemies.push(new EnemyState());
+        }
+
+        for (let i = 0; i < snapshot.length; i++) {
+            const enemyState = enemies.at?.(i) ?? enemies[i];
+            const snap = snapshot[i];
+            if (!enemyState || !snap) {
+                continue;
+            }
+            enemyState.x = snap.x;
+            enemyState.y = snap.y;
+            enemyState.rarity = snap.rarity;
+            enemyState.velocityX = snap.velocityX;
+            enemyState.velocityY = snap.velocityY;
+            enemyState.state = snap.state;
+            enemyState.attackDirection = snap.attackDirection;
+        }
     }
 
     _dispatchKnockbacks() {
@@ -76,28 +83,30 @@ export class BattleRoom extends Room {
         }
     }
 
-    _syncEnemies() {
-        for (const [id] of this.game.enemies) {
-            if (!this.state.enemies.has(id)) {
-                this.state.enemies.set(id, new EnemyState());
-            }
-        }
+    _dispatchPersists() {
+        for (const event of this.game.flushPersists()) {
+            let client = null;
 
-        for (const id of [...this.state.enemies.keys()]) {
-            if (!this.game.enemies.has(id)) {
-                this.state.enemies.delete(id);
+            for (const c of this.clients) {
+                if (c.sessionId === event.sessionId) {
+                    client = c;
+                    break;
+                }
             }
-        }
 
-        this.game.syncEnemiesTo(this.state.enemies);
+            if (!client) {
+                continue;
+            }
+
+            client.send("persistXP", { xp: event.xp });
+        }
     }
 
     onJoin(client, options) {
         const player = new PlayerState();
-
-        player.x = 100;
-        player.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
         player.name = sanitizePlayerName(options?.username || options?.name);
+        player.xp = Math.max(0, Math.floor(Number(options?.xp) || 0));
+        this.game.applyRunStart(player);
 
         this.state.players.set(client.sessionId, player);
 

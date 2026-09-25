@@ -1,4 +1,5 @@
 import { getSession, signOut } from "../Multiplayer/FirebaseConfig.js";
+import { variable } from "../GameValues/LocalVariables.js";
 
 // =====================================================
 // HOME SCREEN
@@ -219,7 +220,12 @@ export function createHome(session) {
         drawButton(0x222222);
 
         if (isLoggedIn) {
-            this.scene.start("Game");
+            variable.username = session.username;
+            variable.persistentXP = session.xp || 0;
+            this.scene.start("Game", {
+                username: session.username,
+                xp: session.xp || 0
+            });
         } else {
             this.scene.start("LoginScene");
         }

@@ -1,24 +1,34 @@
 import Body from "../../node_modules/phaser/src/physics/arcade/Body.js";
 
 import { SETTINGS, ENEMY_STATE } from "../../../shared-data/Constants.js";
+import { getEnemyRadius } from "../../../shared-data/Geometry.js";
 
-// =====================================================
-// ENEMY SPAWN
-// =====================================================
+function enemyCenterX(enemy) {
+    return enemy.x + enemy.radius;
+}
 
-export function createEnemy(world) {
-    const x = Math.floor(
-        Math.random() * (SETTINGS.WORLD_WIDTH - 200) + 100
-    );
+function enemyCenterY(enemy) {
+    return enemy.y + enemy.radius;
+}
 
+export function createEnemy(world, { x, rarity, stats }) {
+    const radius = getEnemyRadius(rarity);
+    const size = radius * 2;
     const enemy = new Body(world);
 
-    enemy.x = x;
-    enemy.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
-
-    enemy.setSize(SETTINGS.PLAYER_SIZE, SETTINGS.PLAYER_SIZE, false);
+    enemy.x = x - radius;
+    enemy.y = SETTINGS.ENTITY_SPAWN_HEIGHT - radius;
+    enemy.setSize(size, size, false);
 
     world.add(enemy);
+
+    enemy.rarity = rarity;
+    enemy.radius = radius;
+    enemy.health = stats.health;
+    enemy.maxHealth = stats.health;
+    enemy.damage = stats.damage;
+    enemy.xp = stats.xp;
+    enemy.stunRemaining = 0;
 
     enemy.state = ENEMY_STATE.IDLE;
     enemy.setCollideWorldBounds(true);
@@ -27,14 +37,10 @@ export function createEnemy(world) {
     enemy.direction = 1;
     enemy.patrolTimer =
         Math.random() *
-        (
-            SETTINGS.ENEMY_PATROL_DECISION_MAX -
-            SETTINGS.ENEMY_PATROL_DECISION_MIN + 1
-        ) +
+            (SETTINGS.ENEMY_PATROL_DECISION_MAX - SETTINGS.ENEMY_PATROL_DECISION_MIN + 1) +
         SETTINGS.ENEMY_PATROL_DECISION_MIN;
     enemy.walkTimer = 0;
     enemy.walking = false;
-
     enemy.attackCooldown = 0;
 
     for (const ground of world.staticBodies) {
@@ -44,13 +50,15 @@ export function createEnemy(world) {
     return enemy;
 }
 
-// =====================================================
-// ENEMY AI
-// =====================================================
+export { enemyCenterX, enemyCenterY };
 
-// players is a Colyseus MapSchema of PlayerState ({ x, y, health })
 export function updateEnemyAI(enemies, players, deltaMs) {
     for (const [, { body: enemy }] of enemies) {
+        if (enemy.stunRemaining > 0) {
+            enemy.stunRemaining -= deltaMs;
+            continue;
+        }
+
         if (enemy.state !== ENEMY_STATE.IDLE) continue;
 
         if (enemy.attackCooldown > 0) {
@@ -85,24 +93,17 @@ export function updateEnemyAI(enemies, players, deltaMs) {
     }
 }
 
-function _enemyCenterX(enemy) {
-    return enemy.x + SETTINGS.PLAYER_SIZE / 2;
-}
-
-function _enemyCenterY(enemy) {
-    return enemy.y + SETTINGS.PLAYER_SIZE / 2;
-}
-
 function _nearestPlayer(enemy, players) {
     let nearestDist = Infinity;
     let nearestPlayer = null;
     let nearestDx = 0;
 
-    const cx = _enemyCenterX(enemy);
-    const cy = _enemyCenterY(enemy);
+    const cx = enemyCenterX(enemy);
+    const cy = enemyCenterY(enemy);
 
     for (const [, player] of players) {
         if (player.health <= 0) continue;
+        if (!player.spawnExited) continue;
 
         const dx = player.x - cx;
         const dy = player.y - cy;
@@ -127,14 +128,13 @@ function _patrol(enemy, deltaMs) {
     if (enemy.patrolTimer <= 0) {
         enemy.patrolTimer =
             Math.random() *
-            (SETTINGS.ENEMY_PATROL_DECISION_MAX - SETTINGS.ENEMY_PATROL_DECISION_MIN + 1) +
+                (SETTINGS.ENEMY_PATROL_DECISION_MAX - SETTINGS.ENEMY_PATROL_DECISION_MIN + 1) +
             SETTINGS.ENEMY_PATROL_DECISION_MIN;
 
         if (Math.random() < SETTINGS.ENEMY_PATROL_MOVE_CHANCE) {
             enemy.walking = true;
             enemy.direction = Math.random() < 0.5 ? -1 : 1;
-            enemy.walkTimer =
-                Math.random() * (1200 - 300 + 1) + 300;
+            enemy.walkTimer = Math.random() * (1200 - 300 + 1) + 300;
         } else {
             enemy.walking = false;
         }
@@ -142,39 +142,36 @@ function _patrol(enemy, deltaMs) {
 
     if (enemy.walking) {
         enemy.setVelocityX(SETTINGS.ENEMY_PATROL_SPEED * enemy.direction);
-
         enemy.walkTimer -= deltaMs;
 
         if (enemy.walkTimer <= 0) {
             enemy.walking = false;
             enemy.setVelocityX(0);
-            enemy.patrolTimer =
-                Math.random() * (2000 - 500 + 1) + 500;
+            enemy.patrolTimer = Math.random() * (2000 - 500 + 1) + 500;
         }
     } else {
         enemy.setVelocityX(0);
     }
 }
 
-// =====================================================
-// ENEMY ATTACK
-// =====================================================
-
 export function startEnemyAttack(enemy, targetPlayer, allPlayers) {
     enemy.state = ENEMY_STATE.WINDUP;
     enemy.setVelocity(0, 0);
 
     enemy.attackDirection = Math.atan2(
-        targetPlayer.y - _enemyCenterY(enemy),
-        targetPlayer.x - _enemyCenterX(enemy)
+        targetPlayer.y - enemyCenterY(enemy),
+        targetPlayer.x - enemyCenterX(enemy)
     );
 
     enemy._attackTimeout = SETTINGS.ENEMY_ATTACK_DELAY;
     enemy._attackPlayers = allPlayers;
 }
 
-// Called from HeadlessGame.update() each tick to advance attack state timers
 export function tickEnemyAttack(enemy, deltaMs) {
+    if (enemy.stunRemaining > 0) {
+        return;
+    }
+
     if (enemy.state === ENEMY_STATE.WINDUP) {
         enemy._attackTimeout -= deltaMs;
 
@@ -200,8 +197,8 @@ export function tickEnemyAttack(enemy, deltaMs) {
 
 function _executeEnemyAttack(enemy) {
     enemy.state = ENEMY_STATE.ATTACK;
-    enemy.attackOriginX = _enemyCenterX(enemy);
-    enemy.attackOriginY = _enemyCenterY(enemy);
+    enemy.attackOriginX = enemyCenterX(enemy);
+    enemy.attackOriginY = enemyCenterY(enemy);
     enemy._attackDurationRemaining = SETTINGS.ENEMY_ATTACK_DURATION;
 
     return _damagePlayersInFan(enemy, enemy._attackPlayers);
@@ -213,6 +210,7 @@ function _damagePlayersInFan(enemy, players) {
 
     for (const [sessionId, player] of players) {
         if (player.health <= 0) continue;
+        if (!player.spawnExited) continue;
 
         const dx = player.x - enemy.attackOriginX;
         const dy = player.y - enemy.attackOriginY;
@@ -223,12 +221,11 @@ function _damagePlayersInFan(enemy, players) {
         const playerAngle = Math.atan2(dy, dx);
         let angleDiff = playerAngle - enemy.attackDirection;
 
-        // Wrap angle to [-PI, PI]
         while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
         while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
         if (Math.abs(angleDiff) <= halfSweep) {
-            player.health = Math.max(0, player.health - SETTINGS.ENEMY_ATTACK_DAMAGE);
+            player.health = Math.max(0, player.health - enemy.damage);
             hits.push({
                 sessionId,
                 pusherX: enemy.attackOriginX,

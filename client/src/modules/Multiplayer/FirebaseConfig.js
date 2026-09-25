@@ -15,6 +15,7 @@ import {
     getFirestore,
     doc,
     getDoc,
+    setDoc,
     runTransaction,
     serverTimestamp
 } from "firebase/firestore";
@@ -86,14 +87,15 @@ export async function getSession() {
     const user = await waitForAuth();
 
     if (!user) {
-        return { user: null, username: null };
+        return { user: null, username: null, xp: 0 };
     }
 
     const profile = await getUserProfile(user.uid);
 
     return {
         user,
-        username: profile?.username ?? null
+        username: profile?.username ?? null,
+        xp: Math.max(0, Math.floor(Number(profile?.xp) || 0))
     };
 }
 
@@ -104,7 +106,8 @@ export async function signInWithGoogle() {
 
     return {
         user: result.user,
-        username: profile?.username ?? null
+        username: profile?.username ?? null,
+        xp: Math.max(0, Math.floor(Number(profile?.xp) || 0))
     };
 }
 
@@ -162,9 +165,24 @@ export async function claimUsername(uid, username) {
         transaction.set(nameRef, { uid });
         transaction.set(userRef, {
             username,
+            xp: 0,
             createdAt: serverTimestamp()
         });
     });
 
     return username;
+}
+
+export async function persistXP(xp) {
+    const user = await waitForAuth();
+    if (!user) {
+        return;
+    }
+
+    const { db: firestore } = getFirebase();
+    await setDoc(
+        doc(firestore, "users", user.uid),
+        { xp: Math.max(0, Math.floor(Number(xp) || 0)) },
+        { merge: true }
+    );
 }

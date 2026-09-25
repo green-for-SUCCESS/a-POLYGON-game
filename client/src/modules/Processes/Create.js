@@ -8,6 +8,7 @@ import { connect } from "../Multiplayer/Network.js";
 import { createPlayer, updateHealthBar, damagePlayer } from "../Entities/Players.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { variable } from "../GameValues/LocalVariables.js";
+import { createMinimap } from "../UI/Minimap.js";
 
 export function create() {
 
@@ -282,4 +283,6 @@ export function create() {
 
     this.enemyDebugGraphics = this.add.graphics();
     this.enemyDebugGraphics.setDepth(9999);
+
+    createMinimap(this);
 }
