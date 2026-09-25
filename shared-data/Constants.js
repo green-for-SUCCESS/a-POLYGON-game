@@ -52,9 +52,9 @@ export const SETTINGS = {
 
     // ---------------- ENEMY STATS ----------------
     ENEMY_BASE_HEALTH: 48,
-    ENEMY_HEALTH_GROWTH: 4,
-    ENEMY_BASE_DAMAGE: 2.5,
-    ENEMY_DAMAGE_GROWTH: 4,
+    ENEMY_HEALTH_GROWTH: 2.5,
+    ENEMY_BASE_DAMAGE: 2,
+    ENEMY_DAMAGE_GROWTH: 2.5,
     ENEMY_BASE_XP: 2,
     ENEMY_XP_GROWTH: 4,
 
