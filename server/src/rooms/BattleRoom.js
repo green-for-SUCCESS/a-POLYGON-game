@@ -24,6 +24,10 @@ export class BattleRoom extends Room {
             this.game.respawnPlayer(client.sessionId);
         });
 
+        this.onMessage("slash", (client, data) => {
+            this.game.applyPlayerSlash(client.sessionId, data);
+        });
+
         this.setSimulationInterval((deltaTime) => {
             this.game.update(deltaTime);
             this._syncEnemies();

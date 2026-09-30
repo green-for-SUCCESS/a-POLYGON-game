@@ -7,6 +7,7 @@ import { blockWidth, blockHeight, allBlocks, groundBlocks, stoneObjects, spikePo
 import { connect } from "../Multiplayer/Network.js";
 import { createPlayer, updateHealthBar, damagePlayer } from "../Entities/Players.js";
 import { applyKnockback } from "../Logic/Physics.js";
+import { playSlashEffect } from "../Entities/Effects.js";
 import { variable } from "../GameValues/LocalVariables.js";
 import { createMinimap } from "../UI/Minimap.js";
 
@@ -285,4 +286,26 @@ export function create() {
     this.enemyDebugGraphics.setDepth(9999);
 
     createMinimap(this);
+
+    // =================================================
+    // SLASH ATTACK (click to attack toward the cursor)
+    // =================================================
+
+    this.input.on('pointerdown', (pointer, currentlyOver) => {
+        // Skip clicks that landed on a UI button (suicide, respawn, menu, etc).
+        if (currentlyOver.length > 0) return;
+        if (!variable.player || !variable.player.active || variable.deathScreen) return;
+        if (!variable.room) return;
+
+        const dx = pointer.worldX - variable.player.x;
+        const dy = pointer.worldY - variable.player.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 1e-3) return;
+
+        const dirX = dx / length;
+        const dirY = dy / length;
+
+        variable.room.send("slash", { dx: dirX, dy: dirY });
+        playSlashEffect(variable.player.x, variable.player.y, dirX, dirY);
+    });
 }

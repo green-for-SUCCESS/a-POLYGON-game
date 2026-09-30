@@ -6,6 +6,7 @@ import { variable } from "../GameValues/LocalVariables.js";
 import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
 import { getSession, persistXP } from "./FirebaseConfig.js";
 import { applyKnockback } from "../Logic/Physics.js";
+import { playSlashEffect } from "../Entities/Effects.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 
 export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
@@ -90,6 +91,16 @@ export async function connect() {
                         killRemotePlayer(remote);
                     } else if (prevHealth <= 0 && nextHealth > 0) {
                         reviveRemotePlayer(remote);
+                    }
+
+                    if (playerState.slashSeq && playerState.slashSeq !== remote.lastSlashSeq) {
+                        remote.lastSlashSeq = playerState.slashSeq;
+                        playSlashEffect(
+                            remote.targetX,
+                            remote.targetY,
+                            playerState.slashDirX,
+                            playerState.slashDirY
+                        );
                     }
                 }
 

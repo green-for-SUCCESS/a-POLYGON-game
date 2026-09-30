@@ -2,6 +2,7 @@ import Body from "../../node_modules/phaser/src/physics/arcade/Body.js";
 
 import { SETTINGS, ENEMY_STATE } from "../../../shared-data/Constants.js";
 import { getEnemyBodyMetrics } from "../../../shared-data/Geometry.js";
+import { applyKnockbackToVelocity } from "../../../shared-data/Combat.js";
 
 function enemyCenterX(enemy) {
     return enemy.x + enemy.width / 2;
@@ -202,6 +203,42 @@ function _executeEnemyAttack(enemy) {
     enemy._attackDurationRemaining = SETTINGS.ENEMY_ATTACK_DURATION;
 
     return _damagePlayersInFan(enemy, enemy._attackPlayers);
+}
+
+// Player Slash attack: a narrow directional arc (PLAYER_SLASH_ARC is much
+// smaller than ENEMY_ATTACK_SWEEP), tested with a dot product against each
+// enemy's normalized direction from the origin rather than atan2, since this
+// runs against every live enemy (up to MAX_ENEMIES) on every click.
+export function applySlashToEnemies(enemies, originX, originY, dirX, dirY, damage) {
+    const halfArcRad = (SETTINGS.PLAYER_SLASH_ARC / 2) * (Math.PI / 180);
+    const cosHalfArc = Math.cos(halfArcRad);
+    const deadIds = [];
+
+    for (const [id, { body }] of enemies) {
+        const ex = enemyCenterX(body);
+        const ey = enemyCenterY(body);
+        const dx = ex - originX;
+        const dy = ey - originY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > SETTINGS.PLAYER_SLASH_RANGE || distance < 1e-6) {
+            continue;
+        }
+
+        const dot = (dx / distance) * dirX + (dy / distance) * dirY;
+        if (dot < cosHalfArc) {
+            continue;
+        }
+
+        body.health -= damage;
+        applyKnockbackToVelocity(body.velocity, originX, originY, ex, ey, SETTINGS.PLAYER_SLASH_KNOCKBACK);
+
+        if (body.health <= 0) {
+            deadIds.push(id);
+        }
+    }
+
+    return deadIds;
 }
 
 function _damagePlayersInFan(enemy, players) {

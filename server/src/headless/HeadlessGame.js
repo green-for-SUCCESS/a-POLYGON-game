@@ -5,8 +5,8 @@ import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
 import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd, getZoneAtX } from "../../../shared-data/Zones.js";
-import { getLinearFalloff, knockbackVelocity } from "../../../shared-data/Combat.js";
-import { createEnemy, updateEnemyAI, tickEnemyAttack, enemyCenterX, enemyCenterY } from "./Enemies.js";
+import { getLinearFalloff, applyKnockbackToVelocity, getFastfallCooldown } from "../../../shared-data/Combat.js";
+import { createEnemy, updateEnemyAI, tickEnemyAttack, applySlashToEnemies, enemyCenterX, enemyCenterY } from "./Enemies.js";
 
 export class HeadlessGame {
 
@@ -62,6 +62,8 @@ export class HeadlessGame {
         player.y = SETTINGS.ENTITY_SPAWN_HEIGHT;
         player._stats = stats;
         player.fastfallArmed = false;
+        player.fastfallCooldownRemaining = 0;
+        player.slashCooldownRemaining = 0;
         player.runEnded = false;
     }
 
@@ -76,6 +78,43 @@ export class HeadlessGame {
         this._enforceSpawnBoundary(player, data.x);
     }
 
+    applyPlayerSlash(sessionId, data) {
+        const player = this.players?.get(sessionId);
+        if (!player || player.health <= 0 || !player.spawnExited) {
+            return;
+        }
+
+        if (player.slashCooldownRemaining > 0) {
+            return;
+        }
+
+        const dx = Number(data?.dx);
+        const dy = Number(data?.dy);
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+            return;
+        }
+
+        const length = Math.hypot(dx, dy);
+        if (length < 1e-6) {
+            return;
+        }
+
+        const dirX = dx / length;
+        const dirY = dy / length;
+
+        player.slashCooldownRemaining = SETTINGS.PLAYER_SLASH_COOLDOWN;
+        player.slashDirX = dirX;
+        player.slashDirY = dirY;
+        player.slashSeq = (player.slashSeq || 0) + 1;
+
+        const stats = player._stats || getPlayerStatsFromXP(player.xp || 0);
+        const deadIds = applySlashToEnemies(this.enemies, player.x, player.y, dirX, dirY, stats.damage);
+
+        for (const id of deadIds) {
+            this._killEnemy(id, player);
+        }
+    }
+
     _enforceSpawnBoundary(player, requestedX = player.x) {
         const spawnEnd = getSpawnZoneEnd();
 
@@ -84,6 +123,16 @@ export class HeadlessGame {
         }
 
         player.x = clampPlayerOutOfSpawn(requestedX, player.spawnExited);
+    }
+
+    _tickPlayerCooldowns(player, deltaMs) {
+        if (player.fastfallCooldownRemaining > 0) {
+            player.fastfallCooldownRemaining = Math.max(0, player.fastfallCooldownRemaining - deltaMs);
+        }
+
+        if (player.slashCooldownRemaining > 0) {
+            player.slashCooldownRemaining = Math.max(0, player.slashCooldownRemaining - deltaMs);
+        }
     }
 
     killPlayer(sessionId) {
@@ -110,6 +159,7 @@ export class HeadlessGame {
             for (const [, player] of this.players) {
                 if (player.health > 0) {
                     this._enforceSpawnBoundary(player);
+                    this._tickPlayerCooldowns(player, deltaMs);
                 }
             }
         }
@@ -227,9 +277,16 @@ export class HeadlessGame {
 
             player.fastfallArmed = false;
 
-            if (this._isNearGround(player.y)) {
-                this.applyFastfallLanding(player);
+            if (!this._isNearGround(player.y)) {
+                continue;
             }
+
+            if (player.fastfallCooldownRemaining > 0) {
+                continue;
+            }
+
+            this.applyFastfallLanding(player);
+            player.fastfallCooldownRemaining = getFastfallCooldown();
         }
     }
 
@@ -263,9 +320,7 @@ export class HeadlessGame {
             body.health -= damage;
 
             const force = stats.fastfallKnockback * falloff;
-            const knock = knockbackVelocity(player.x, player.y, ex, ey, force);
-            body.velocity.x += knock.vx;
-            body.velocity.y += knock.vy;
+            applyKnockbackToVelocity(body.velocity, player.x, player.y, ex, ey, force);
             body.stunRemaining = Math.max(body.stunRemaining || 0, stats.fastfallStunDuration * falloff);
 
             if (body.health <= 0) {

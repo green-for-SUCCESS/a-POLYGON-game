@@ -98,6 +98,19 @@ export const SETTINGS = {
     PLAYER_FASTFALL_KNOCKBACK_GROWTH: 1.08,
     PLAYER_FASTFALL_STUN: 500,
 
+    // Fixed base gameplay value — does NOT scale with player level.
+    // Future items may reduce the effective cooldown (see getFastfallCooldown in Combat.js),
+    // but never below PLAYER_FASTFALL_MIN_COOLDOWN.
+    PLAYER_FASTFALL_COOLDOWN: 1000,
+    PLAYER_FASTFALL_MIN_COOLDOWN: 200,
+
+    // ---------------- PLAYER SLASH ----------------
+    PLAYER_SLASH_RANGE: 140,
+    PLAYER_SLASH_ARC: 40,        // degrees — much narrower than ENEMY_ATTACK_SWEEP
+    PLAYER_SLASH_COOLDOWN: 350,  // ms
+    PLAYER_SLASH_KNOCKBACK: 800,
+    PLAYER_SLASH_VISUAL_DURATION: 120, // ms, client-side placeholder visual only
+
     // ---------------- CHECKPOINT ----------------
     CHECKPOINT_SIZE: 32,
     CHECKPOINT_STORAGE_KEY: 'variable.lastCheckpoint',

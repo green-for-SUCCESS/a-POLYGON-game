@@ -10,4 +10,7 @@ export const PlayerState = schema({
     xp: { type: "number", default: 0 },
     runXP: { type: "number", default: 0 },
     spawnExited: { type: "boolean", default: false },
+    slashDirX: { type: "number", default: 0 },
+    slashDirY: { type: "number", default: 0 },
+    slashSeq: { type: "number", default: 0 },
 });

@@ -63,3 +63,29 @@ export function shatterAt(x, y, vx, vy, textureKey, tint) {
         }
     }
 }
+
+// =====================================================
+// SLASH VISUAL (placeholder)
+// Purely cosmetic — the real hit detection/damage/knockback
+// happens authoritatively in the HeadlessGame.
+// =====================================================
+export function playSlashEffect(x, y, dirX, dirY) {
+    if (!variable.sceneRef) return;
+
+    const length = SETTINGS.PLAYER_SLASH_RANGE;
+    const halfArc = (SETTINGS.PLAYER_SLASH_ARC / 2) * (Math.PI / 180);
+    const dir = Math.atan2(dirY, dirX);
+
+    const graphics = variable.sceneRef.add.graphics();
+    graphics.setDepth(1500);
+    graphics.fillStyle(0xffffff, 0.35);
+    graphics.beginPath();
+    graphics.moveTo(x, y);
+    graphics.arc(x, y, length, dir - halfArc, dir + halfArc, false);
+    graphics.closePath();
+    graphics.fillPath();
+
+    variable.sceneRef.time.delayedCall(SETTINGS.PLAYER_SLASH_VISUAL_DURATION, () => {
+        graphics.destroy();
+    });
+}
