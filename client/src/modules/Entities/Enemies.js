@@ -4,6 +4,7 @@ import { variable } from "../GameValues/LocalVariables.js";
 import { shatterAt } from "./Effects.js";
 
 const MATCH_DISTANCE = 140;
+const HIT_FLASH_DURATION = 100; // ms
 
 export function applyEnemySnapshot(snapshot) {
     const scene = variable.sceneRef;
@@ -41,7 +42,23 @@ export function applyEnemySnapshot(snapshot) {
             visual.velocityX = snap.velocityX;
             visual.velocityY = snap.velocityY;
             visual.sprite.setPosition(snap.x, snap.y);
-            applyStateTint(visual);
+
+            // A hit that doesn't kill the enemy previously had almost no visible
+            // feedback (health was never even synced to the client). Flash white
+            // briefly whenever health drops, so Slash/Fastfall hits are obvious.
+            if (snap.health < visual.health) {
+                visual.flashUntil = Date.now() + HIT_FLASH_DURATION;
+            }
+            visual.health = snap.health ?? visual.health;
+            visual.maxHealth = snap.maxHealth ?? visual.maxHealth;
+
+            if (visual.flashUntil && Date.now() < visual.flashUntil) {
+                visual.sprite.setTint(0xffffff);
+            } else {
+                visual.flashUntil = 0;
+                applyStateTint(visual);
+            }
+
             next.push(visual);
         } else {
             next.push(createEnemyVisual(scene, snap));
@@ -81,6 +98,9 @@ function createEnemyVisual(scene, snap) {
         attackDirection: snap.attackDirection ?? 0,
         velocityX: snap.velocityX ?? 0,
         velocityY: snap.velocityY ?? 0,
+        health: snap.health ?? 0,
+        maxHealth: snap.maxHealth ?? 0,
+        flashUntil: 0,
     };
 
     applyStateTint(visual);

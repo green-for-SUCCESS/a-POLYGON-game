@@ -81,6 +81,13 @@ export const SETTINGS = {
     ENEMY_ATTACK_DURATION: 150,
     ENEMY_KNOCKBACK: 1000,
 
+    // Unlike the player (who decelerates every frame via PLAYER_DRAG_COEFFICIENT),
+    // enemies have no native drag, so a knockback velocity would otherwise persist
+    // at nearly full speed for the entire stun window. This is the fraction of
+    // velocity an enemy retains after a full second of being stunned (exponential
+    // decay applied only while stunRemaining > 0 — never touches normal AI movement).
+    ENEMY_KNOCKBACK_VELOCITY_DECAY: 0.05,
+
     // ---------------- PLAYER PROGRESSION ----------------
     LEVEL_XP_BASE: 100,
     LEVEL_XP_GROWTH: 1.25,

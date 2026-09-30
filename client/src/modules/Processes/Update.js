@@ -75,6 +75,8 @@ function readEnemySnapshot(enemies) {
             velocityY: enemy.velocityY ?? 0,
             state: enemy.state ?? 0,
             attackDirection: enemy.attackDirection ?? 0,
+            health: enemy.health ?? 0,
+            maxHealth: enemy.maxHealth ?? 0,
         });
     }
 

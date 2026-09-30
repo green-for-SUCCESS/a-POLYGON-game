@@ -179,6 +179,10 @@ export function create() {
     // CONTROLS
     // =================================================
 
+    // Without this, right-clicking the canvas pops the native browser context
+    // menu, which swallows the click and can make Slash look unresponsive.
+    this.input.mouse?.disableContextMenu();
+
     variable.cursors = this.input.keyboard.createCursorKeys();
 
     variable.wasd = this.input.keyboard.addKeys('W,S,A,D');
@@ -292,6 +296,8 @@ export function create() {
     // =================================================
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
+        // Only the left mouse button triggers Slash (not right/middle click).
+        if (!pointer.leftButtonDown()) return;
         // Skip clicks that landed on a UI button (suicide, respawn, menu, etc).
         if (currentlyOver.length > 0) return;
         if (!variable.player || !variable.player.active || variable.deathScreen) return;

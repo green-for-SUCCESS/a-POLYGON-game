@@ -8,4 +8,6 @@ export const EnemyState = schema({
     velocityY: { type: "number", default: 0 },
     state: { type: "number", default: 0 },
     attackDirection: { type: "number", default: 0 },
+    health: { type: "number", default: 0 },
+    maxHealth: { type: "number", default: 0 },
 });

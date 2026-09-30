@@ -57,6 +57,7 @@ export function updateEnemyAI(enemies, players, deltaMs) {
     for (const [, { body: enemy }] of enemies) {
         if (enemy.stunRemaining > 0) {
             enemy.stunRemaining -= deltaMs;
+            _decayKnockbackVelocity(enemy, deltaMs);
             continue;
         }
 
@@ -92,6 +93,16 @@ export function updateEnemyAI(enemies, players, deltaMs) {
             _patrol(enemy, deltaMs);
         }
     }
+}
+
+// Only runs while an enemy is stunned (i.e. exactly the window during which AI
+// has ceded control of its velocity to a knockback impulse). Decays horizontal
+// speed so a hit doesn't send the enemy sliding at near-full velocity for the
+// whole stun duration. Vertical velocity is left alone — gravity/ground
+// collision already resolve it.
+function _decayKnockbackVelocity(enemy, deltaMs) {
+    const decay = Math.pow(SETTINGS.ENEMY_KNOCKBACK_VELOCITY_DECAY, deltaMs / 1000);
+    enemy.velocity.x *= decay;
 }
 
 function _nearestPlayer(enemy, players) {

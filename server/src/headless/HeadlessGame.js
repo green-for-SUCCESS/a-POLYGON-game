@@ -399,6 +399,8 @@ export class HeadlessGame {
                 velocityY: body.velocity.y,
                 state: body.state ?? 0,
                 attackDirection: body.attackDirection ?? 0,
+                health: body.health ?? 0,
+                maxHealth: body.maxHealth ?? 0,
             });
         }
 

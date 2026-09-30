@@ -61,6 +61,8 @@ export class BattleRoom extends Room {
             enemyState.velocityY = snap.velocityY;
             enemyState.state = snap.state;
             enemyState.attackDirection = snap.attackDirection;
+            enemyState.health = snap.health;
+            enemyState.maxHealth = snap.maxHealth;
         }
     }
 
