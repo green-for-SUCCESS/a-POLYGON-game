@@ -101,8 +101,8 @@ export const SETTINGS = {
     // Fixed base gameplay value — does NOT scale with player level.
     // Future items may reduce the effective cooldown (see getFastfallCooldown in Combat.js),
     // but never below PLAYER_FASTFALL_MIN_COOLDOWN.
-    PLAYER_FASTFALL_COOLDOWN: 1000,
-    PLAYER_FASTFALL_MIN_COOLDOWN: 200,
+    PLAYER_FASTFALL_COOLDOWN: 30000,
+    PLAYER_FASTFALL_MIN_COOLDOWN: 0,
 
     // ---------------- PLAYER SLASH ----------------
     PLAYER_SLASH_RANGE: 140,
