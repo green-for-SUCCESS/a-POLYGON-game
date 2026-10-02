@@ -63,7 +63,7 @@ export const SETTINGS = {
 
     // ---------------- ENEMY AI ----------------
     ENEMY_PATROL_SPEED: 200,
-    ENEMY_CHASE_SPEED_MULT: 4,
+    ENEMY_CHASE_SPEED_MULT: 4.5,
 
     ENEMY_FRONT_RANGE: 600,
     ENEMY_BACK_RANGE: 200,
@@ -86,7 +86,7 @@ export const SETTINGS = {
     // at nearly full speed for the entire stun window. This is the fraction of
     // velocity an enemy retains after a full second of being stunned (exponential
     // decay applied only while stunRemaining > 0 — never touches normal AI movement).
-    ENEMY_KNOCKBACK_VELOCITY_DECAY: 0.05,
+    ENEMY_KNOCKBACK_VELOCITY_DECAY: 0.4,
 
     // ---------------- PLAYER PROGRESSION ----------------
     LEVEL_XP_BASE: 100,
@@ -101,14 +101,14 @@ export const SETTINGS = {
     PLAYER_FASTFALL_DAMAGE: 16,
     PLAYER_FASTFALL_DAMAGE_GROWTH: 1.15,
     PLAYER_FASTFALL_RADIUS: 180,
-    PLAYER_FASTFALL_KNOCKBACK: 900,
+    PLAYER_FASTFALL_KNOCKBACK: 4000,
     PLAYER_FASTFALL_KNOCKBACK_GROWTH: 1.08,
     PLAYER_FASTFALL_STUN: 500,
 
     // Fixed base gameplay value — does NOT scale with player level.
     // Future items may reduce the effective cooldown (see getFastfallCooldown in Combat.js),
     // but never below PLAYER_FASTFALL_MIN_COOLDOWN.
-    PLAYER_FASTFALL_COOLDOWN: 30000,
+    PLAYER_FASTFALL_COOLDOWN: 5000,
     PLAYER_FASTFALL_MIN_COOLDOWN: 0,
 
     // ---------------- PLAYER SLASH ----------------
