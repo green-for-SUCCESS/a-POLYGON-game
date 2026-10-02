@@ -32,8 +32,16 @@ export class BattleRoom extends Room {
             this.game.update(deltaTime);
             this._syncEnemies();
             this._dispatchKnockbacks();
+            this._dispatchFastfallDenials();
             this._dispatchPersists();
         });
+    }
+
+    _dispatchFastfallDenials() {
+        for (const event of this.game.flushFastfallDenials()) {
+            const client = this.clients.find((c) => c.sessionId === event.sessionId);
+            client?.send("fastfallDenied");
+        }
     }
 
     _syncEnemies() {

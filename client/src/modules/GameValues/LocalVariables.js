@@ -40,6 +40,8 @@ export const variable = {
     xpHud: null,
     playerMaxHealth: 100,
     spawnExited: false,
+    fastfallReady: true,
+    fastfallBlocked: false,
     persistentXP: 0,
     runXP: 0,
     allBlocks: [],

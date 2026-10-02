@@ -50,6 +50,16 @@ export async function connect() {
             );
         });
 
+        room.onMessage("fastfallDenied", () => {
+            variable.fastfallReady = false;
+            variable.fastfallBlocked = true;
+
+            if (variable.player?.active && variable.player.body && variable.player.isFastFalling) {
+                variable.player.isFastFalling = false;
+                variable.player.setVelocityY(0);
+            }
+        });
+
         room.onMessage("persistXP", (data) => {
             const nextXP = Math.max(0, Math.floor(Number(data?.xp) || 0));
             variable.persistentXP = nextXP;
@@ -147,5 +157,6 @@ function applyLocalPlayerState(playerState) {
 
     variable.runXP = playerState.runXP ?? 0;
     variable.spawnExited = !!playerState.spawnExited;
+    variable.fastfallReady = playerState.fastfallReady !== false;
     updateProgressHud();
 }

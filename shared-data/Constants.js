@@ -62,7 +62,13 @@ export const SETTINGS = {
     MAX_ENEMIES: 300,
 
     // ---------------- ENEMY AI ----------------
-    ENEMY_PATROL_SPEED: 200,
+    // Enemy movement uses the player's force/mass/drag model (see Movement.js).
+    // Terminal speed = force / (mass * drag): patrol = 600 / (1 * 3) = 200 px/s,
+    // chase = patrol force * ENEMY_CHASE_SPEED_MULT. Drag is also what decays knockback,
+    // so a knockback impulse travels roughly strength / ENEMY_DRAG_COEFFICIENT pixels.
+    ENEMY_MASS: 1,
+    ENEMY_MOVE_FORCE: 600,
+    ENEMY_DRAG_COEFFICIENT: 3,
     ENEMY_CHASE_SPEED_MULT: 4.5,
 
     ENEMY_FRONT_RANGE: 600,
@@ -80,13 +86,6 @@ export const SETTINGS = {
     ENEMY_ATTACK_COOLDOWN: 300, // ms
     ENEMY_ATTACK_DURATION: 150,
     ENEMY_KNOCKBACK: 1000,
-
-    // Unlike the player (who decelerates every frame via PLAYER_DRAG_COEFFICIENT),
-    // enemies have no native drag, so a knockback velocity would otherwise persist
-    // at nearly full speed for the entire stun window. This is the fraction of
-    // velocity an enemy retains after a full second of being stunned (exponential
-    // decay applied only while stunRemaining > 0 — never touches normal AI movement).
-    ENEMY_KNOCKBACK_VELOCITY_DECAY: 0.4,
 
     // ---------------- PLAYER PROGRESSION ----------------
     LEVEL_XP_BASE: 100,

@@ -3,6 +3,7 @@ import Body from "../../node_modules/phaser/src/physics/arcade/Body.js";
 import { SETTINGS, ENEMY_STATE } from "../../../shared-data/Constants.js";
 import { getEnemyBodyMetrics } from "../../../shared-data/Geometry.js";
 import { applyKnockbackToVelocity } from "../../../shared-data/Combat.js";
+import { stepDragVelocity } from "../../../shared-data/Movement.js";
 
 function enemyCenterX(enemy) {
     return enemy.x + enemy.width / 2;
@@ -44,6 +45,10 @@ export function createEnemy(world, { x, rarity, stats }) {
     enemy.walking = false;
     enemy.attackCooldown = 0;
 
+    // AI writes intent only; stepEnemyMovement turns it into force -> velocity.
+    enemy.moveIntent = 0;
+    enemy.moveForceScale = 1;
+
     for (const ground of world.staticBodies) {
         world.addCollider(enemy, ground);
     }
@@ -53,11 +58,30 @@ export function createEnemy(world, { x, rarity, stats }) {
 
 export { enemyCenterX, enemyCenterY };
 
+// Force -> acceleration (÷ mass) -> velocity, with drag always applied, same
+// model as the player. Knockback impulses added to body.velocity decay through
+// this same drag. Position is never touched; Arcade integrates velocity.
+export function stepEnemyMovement(enemies, deltaMs) {
+    const dt = Math.max(0, deltaMs) / 1000;
+
+    for (const [, { body }] of enemies) {
+        const force = body.moveIntent * SETTINGS.ENEMY_MOVE_FORCE * body.moveForceScale;
+
+        body.velocity.x = stepDragVelocity(
+            body.velocity.x,
+            force,
+            SETTINGS.ENEMY_MASS,
+            SETTINGS.ENEMY_DRAG_COEFFICIENT,
+            dt
+        );
+    }
+}
+
 export function updateEnemyAI(enemies, players, deltaMs) {
     for (const [, { body: enemy }] of enemies) {
         if (enemy.stunRemaining > 0) {
             enemy.stunRemaining -= deltaMs;
-            _decayKnockbackVelocity(enemy, deltaMs);
+            enemy.moveIntent = 0;
             continue;
         }
 
@@ -86,23 +110,12 @@ export function updateEnemyAI(enemies, players, deltaMs) {
             enemy.walking = false;
             const chaseDir = dx > 0 ? 1 : -1;
             enemy.direction = chaseDir;
-            enemy.setVelocityX(
-                SETTINGS.ENEMY_PATROL_SPEED * SETTINGS.ENEMY_CHASE_SPEED_MULT * chaseDir
-            );
+            enemy.moveIntent = chaseDir;
+            enemy.moveForceScale = SETTINGS.ENEMY_CHASE_SPEED_MULT;
         } else {
             _patrol(enemy, deltaMs);
         }
     }
-}
-
-// Only runs while an enemy is stunned (i.e. exactly the window during which AI
-// has ceded control of its velocity to a knockback impulse). Decays horizontal
-// speed so a hit doesn't send the enemy sliding at near-full velocity for the
-// whole stun duration. Vertical velocity is left alone — gravity/ground
-// collision already resolve it.
-function _decayKnockbackVelocity(enemy, deltaMs) {
-    const decay = Math.pow(SETTINGS.ENEMY_KNOCKBACK_VELOCITY_DECAY, deltaMs / 1000);
-    enemy.velocity.x *= decay;
 }
 
 function _nearestPlayer(enemy, players) {
@@ -133,6 +146,8 @@ function _nearestPlayer(enemy, players) {
 }
 
 function _patrol(enemy, deltaMs) {
+    enemy.moveForceScale = 1;
+
     if (!enemy.walking) {
         enemy.patrolTimer -= deltaMs;
     }
@@ -153,21 +168,23 @@ function _patrol(enemy, deltaMs) {
     }
 
     if (enemy.walking) {
-        enemy.setVelocityX(SETTINGS.ENEMY_PATROL_SPEED * enemy.direction);
+        enemy.moveIntent = enemy.direction;
         enemy.walkTimer -= deltaMs;
 
         if (enemy.walkTimer <= 0) {
             enemy.walking = false;
-            enemy.setVelocityX(0);
+            enemy.moveIntent = 0;
             enemy.patrolTimer = Math.random() * (2000 - 500 + 1) + 500;
         }
     } else {
-        enemy.setVelocityX(0);
+        enemy.moveIntent = 0;
     }
 }
 
 export function startEnemyAttack(enemy, targetPlayer, allPlayers) {
     enemy.state = ENEMY_STATE.WINDUP;
+    // Existing attack commitment: the enemy plants its feet when winding up.
+    enemy.moveIntent = 0;
     enemy.setVelocity(0, 0);
 
     enemy.attackDirection = Math.atan2(

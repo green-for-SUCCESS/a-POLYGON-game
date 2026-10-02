@@ -6,6 +6,7 @@ export const PlayerState = schema({
     health: { type: "number", default: 100 },
     maxHealth: { type: "number", default: 100 },
     isFastFalling: { type: "boolean", default: false },
+    fastfallReady: { type: "boolean", default: true },
     name: { type: "string", default: "Player" },
     xp: { type: "number", default: 0 },
     runXP: { type: "number", default: 0 },

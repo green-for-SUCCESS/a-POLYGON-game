@@ -402,12 +402,27 @@ export function playerMovementCheck() {
     }
 
     // FAST FALL
+    // Availability comes from the server (variable.fastfallReady, synced from
+    // PlayerState). Pressing Down during cooldown latches fastfallBlocked until
+    // Down is released, so it can't activate the moment the cooldown expires.
+
+    const downHeld =
+        variable.cursors.down.isDown ||
+        variable.wasd.S.isDown;
+
+    if (!downHeld) {
+        variable.fastfallBlocked = false;
+    } else if (!variable.player.isFastFalling && !variable.fastfallReady) {
+        variable.fastfallBlocked = true;
+    }
+
+    const fastfallAllowed =
+        variable.player.isFastFalling ||
+        (variable.fastfallReady && !variable.fastfallBlocked);
 
     if (
-        (
-            variable.cursors.down.isDown ||
-            variable.wasd.S.isDown
-        ) &&
+        downHeld &&
+        fastfallAllowed &&
         !variable.player.body.touching.down
     ) {
     

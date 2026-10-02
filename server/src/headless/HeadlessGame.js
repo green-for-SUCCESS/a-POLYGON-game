@@ -6,7 +6,7 @@ import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
 import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd, getZoneAtX } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, applyKnockbackToVelocity, getFastfallCooldown } from "../../../shared-data/Combat.js";
-import { createEnemy, updateEnemyAI, tickEnemyAttack, applySlashToEnemies, enemyCenterX, enemyCenterY } from "./Enemies.js";
+import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, enemyCenterX, enemyCenterY } from "./Enemies.js";
 
 export class HeadlessGame {
 
@@ -31,6 +31,7 @@ export class HeadlessGame {
         this.nextEnemyId = 0;
         this.pendingKnockbacks = [];
         this.pendingPersists = [];
+        this.pendingFastfallDenials = [];
 
         this._setupGround();
     }
@@ -63,6 +64,8 @@ export class HeadlessGame {
         player._stats = stats;
         player.fastfallArmed = false;
         player.fastfallCooldownRemaining = 0;
+        player.fastfallReady = true;
+        player.fastfallDenied = false;
         player.slashCooldownRemaining = 0;
         player.runEnded = false;
     }
@@ -74,8 +77,43 @@ export class HeadlessGame {
         }
 
         player.y = data.y;
-        player.isFastFalling = !!data.isFastFalling;
+        this._applyFastfallRequest(sessionId, player, !!data.isFastFalling);
         this._enforceSpawnBoundary(player, data.x);
+    }
+
+    // The cooldown is an activation gate: a request made during cooldown never
+    // enters the fastfall state (so no armed landing, no AOE, no cooldown restart).
+    // A denied request is latched until the client releases Down, so holding or
+    // re-pressing Down cannot queue a fastfall for when the cooldown expires.
+    _applyFastfallRequest(sessionId, player, requested) {
+        if (!requested) {
+            player.isFastFalling = false;
+            player.fastfallDenied = false;
+            return;
+        }
+
+        if (player.isFastFalling) {
+            return;
+        }
+
+        if (player.fastfallDenied) {
+            return;
+        }
+
+        if (player.fastfallCooldownRemaining > 0) {
+            player.fastfallDenied = true;
+            this.pendingFastfallDenials.push({ sessionId });
+            return;
+        }
+
+        player.isFastFalling = true;
+        player.fastfallArmed = true;
+
+        // No AOE can happen inside the protected spawn zone, so don't burn the cooldown there.
+        if (player.spawnExited) {
+            player.fastfallCooldownRemaining = getFastfallCooldown();
+            player.fastfallReady = false;
+        }
     }
 
     applyPlayerSlash(sessionId, data) {
@@ -128,6 +166,10 @@ export class HeadlessGame {
     _tickPlayerCooldowns(player, deltaMs) {
         if (player.fastfallCooldownRemaining > 0) {
             player.fastfallCooldownRemaining = Math.max(0, player.fastfallCooldownRemaining - deltaMs);
+
+            if (player.fastfallCooldownRemaining === 0) {
+                player.fastfallReady = true;
+            }
         }
 
         if (player.slashCooldownRemaining > 0) {
@@ -177,6 +219,8 @@ export class HeadlessGame {
                 this.pendingKnockbacks.push(...hits);
             }
         }
+
+        stepEnemyMovement(this.enemies, deltaMs);
 
         this.world.step(deltaMs / 1000);
         this._collectDeaths();
@@ -267,7 +311,6 @@ export class HeadlessGame {
             }
 
             if (player.isFastFalling) {
-                player.fastfallArmed = true;
                 continue;
             }
 
@@ -277,16 +320,9 @@ export class HeadlessGame {
 
             player.fastfallArmed = false;
 
-            if (!this._isNearGround(player.y)) {
-                continue;
+            if (this._isNearGround(player.y)) {
+                this.applyFastfallLanding(player);
             }
-
-            if (player.fastfallCooldownRemaining > 0) {
-                continue;
-            }
-
-            this.applyFastfallLanding(player);
-            player.fastfallCooldownRemaining = getFastfallCooldown();
         }
     }
 
@@ -378,6 +414,12 @@ export class HeadlessGame {
     flushKnockbacks() {
         const events = this.pendingKnockbacks;
         this.pendingKnockbacks = [];
+        return events;
+    }
+
+    flushFastfallDenials() {
+        const events = this.pendingFastfallDenials;
+        this.pendingFastfallDenials = [];
         return events;
     }
 
