@@ -63,13 +63,15 @@ export const SETTINGS = {
 
     // ---------------- ENEMY AI ----------------
     // Enemy movement uses the player's force/mass/drag model (see Movement.js).
-    // Terminal speed = force / (mass * drag): patrol = 600 / (1 * 3) = 200 px/s,
-    // chase = patrol force * ENEMY_CHASE_SPEED_MULT. Drag is also what decays knockback,
-    // so a knockback impulse travels roughly strength / ENEMY_DRAG_COEFFICIENT pixels.
-    ENEMY_MASS: 1,
-    ENEMY_MOVE_FORCE: 600,
-    ENEMY_DRAG_COEFFICIENT: 3,
-    ENEMY_CHASE_SPEED_MULT: 4.5,
+    // Movement force and drag match the player's (same model, same units); mass is
+    // the rarity-scaled property: mass = ENEMY_BASE_MASS * ENEMY_MASS_GROWTH ** rarity.
+    // Terminal speed = force / (mass * drag) -> heavier enemies are slower AND harder to knock back.
+    ENEMY_BASE_MASS: 1,
+    ENEMY_MASS_GROWTH: 1.5,
+    ENEMY_MOVE_FORCE: 300,
+    ENEMY_DRAG_COEFFICIENT: 0.4,
+    // Fraction of full move force used while patrolling (chasing uses full force).
+    ENEMY_PATROL_FORCE_SCALE: 0.27,
 
     ENEMY_FRONT_RANGE: 600,
     ENEMY_BACK_RANGE: 200,

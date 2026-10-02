@@ -5,8 +5,8 @@ import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
 import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd, getZoneAtX } from "../../../shared-data/Zones.js";
-import { getLinearFalloff, applyKnockbackToVelocity, getFastfallCooldown } from "../../../shared-data/Combat.js";
-import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, enemyCenterX, enemyCenterY } from "./Enemies.js";
+import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
+import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
 
 export class HeadlessGame {
 
@@ -352,12 +352,13 @@ export class HeadlessGame {
             }
 
             const falloff = getLinearFalloff(distance, radius);
-            const damage = stats.fastfallDamage * falloff;
-            body.health -= damage;
-
-            const force = stats.fastfallKnockback * falloff;
-            applyKnockbackToVelocity(body.velocity, player.x, player.y, ex, ey, force);
-            body.stunRemaining = Math.max(body.stunRemaining || 0, stats.fastfallStunDuration * falloff);
+            applyEnemyHit(body, {
+                damage: stats.fastfallDamage * falloff,
+                fromX: player.x,
+                fromY: player.y,
+                strength: stats.fastfallKnockback * falloff,
+                stunMs: stats.fastfallStunDuration * falloff,
+            });
 
             if (body.health <= 0) {
                 deadIds.push(id);

@@ -31,6 +31,7 @@ export function createEnemy(world, { x, rarity, stats }) {
     enemy.damage = stats.damage;
     enemy.xp = stats.xp;
     enemy.stunRemaining = 0;
+    enemy.mass = stats.mass;
 
     enemy.state = ENEMY_STATE.IDLE;
     enemy.setCollideWorldBounds(true);
@@ -47,7 +48,7 @@ export function createEnemy(world, { x, rarity, stats }) {
 
     // AI writes intent only; stepEnemyMovement turns it into force -> velocity.
     enemy.moveIntent = 0;
-    enemy.moveForceScale = 1;
+    enemy.moveForceScale = SETTINGS.ENEMY_PATROL_FORCE_SCALE;
 
     for (const ground of world.staticBodies) {
         world.addCollider(enemy, ground);
@@ -70,7 +71,7 @@ export function stepEnemyMovement(enemies, deltaMs) {
         body.velocity.x = stepDragVelocity(
             body.velocity.x,
             force,
-            SETTINGS.ENEMY_MASS,
+            body.mass,
             SETTINGS.ENEMY_DRAG_COEFFICIENT,
             dt
         );
@@ -111,7 +112,7 @@ export function updateEnemyAI(enemies, players, deltaMs) {
             const chaseDir = dx > 0 ? 1 : -1;
             enemy.direction = chaseDir;
             enemy.moveIntent = chaseDir;
-            enemy.moveForceScale = SETTINGS.ENEMY_CHASE_SPEED_MULT;
+            enemy.moveForceScale = 1;
         } else {
             _patrol(enemy, deltaMs);
         }
@@ -146,7 +147,7 @@ function _nearestPlayer(enemy, players) {
 }
 
 function _patrol(enemy, deltaMs) {
-    enemy.moveForceScale = 1;
+    enemy.moveForceScale = SETTINGS.ENEMY_PATROL_FORCE_SCALE;
 
     if (!enemy.walking) {
         enemy.patrolTimer -= deltaMs;
@@ -233,6 +234,26 @@ function _executeEnemyAttack(enemy) {
     return _damagePlayersInFan(enemy, enemy._attackPlayers);
 }
 
+// Single hit path for every player attack on an enemy. Knockback is mass-aware;
+// stun is opt-in per attack (Fastfall passes stunMs > 0, Slash passes 0).
+export function applyEnemyHit(body, { damage, fromX, fromY, strength, stunMs = 0 }) {
+    body.health -= damage;
+
+    applyKnockbackToVelocity(
+        body.velocity,
+        fromX,
+        fromY,
+        enemyCenterX(body),
+        enemyCenterY(body),
+        strength,
+        { mass: body.mass }
+    );
+
+    if (stunMs > 0) {
+        body.stunRemaining = Math.max(body.stunRemaining || 0, stunMs);
+    }
+}
+
 // Player Slash attack: a narrow directional arc (PLAYER_SLASH_ARC is much
 // smaller than ENEMY_ATTACK_SWEEP), tested with a dot product against each
 // enemy's normalized direction from the origin rather than atan2, since this
@@ -258,8 +279,8 @@ export function applySlashToEnemies(enemies, originX, originY, dirX, dirY, damag
             continue;
         }
 
-        body.health -= damage;
-        applyKnockbackToVelocity(body.velocity, originX, originY, ex, ey, SETTINGS.PLAYER_SLASH_KNOCKBACK);
+        // Slash: damage + knockback, never stun.
+        applyEnemyHit(body, { damage, fromX: originX, fromY: originY, strength: SETTINGS.PLAYER_SLASH_KNOCKBACK, stunMs: 0 });
 
         if (body.health <= 0) {
             deadIds.push(id);

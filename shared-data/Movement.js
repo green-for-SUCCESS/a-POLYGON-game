@@ -1,14 +1,19 @@
-// Force/mass/drag movement, the same model the player uses in
-// playerMovementCheck (accel = force/mass - drag*velocity), but integrated
-// exactly over dt so it is frame-rate independent on the server.
-//   dv/dt = F/m - c*v   =>   terminal speed = F / (m * c)
+// Same force/mass/drag model the player uses in playerMovementCheck, per frame:
+//   v' = v + F/m - c*v
+// Here it is advanced by dt using the closed form of that recurrence at the
+// 60 Hz reference rate the player's constants are tuned for, so it is
+// frame-rate independent on the server:  terminal speed = F / (m * c)
+const REFERENCE_FPS = 60;
+
 export function stepDragVelocity(velocity, force, mass, dragCoefficient, dtSeconds) {
     const acceleration = force / mass;
+    const frames = dtSeconds * REFERENCE_FPS;
 
     if (dragCoefficient <= 0) {
-        return velocity + acceleration * dtSeconds;
+        return velocity + acceleration * frames;
     }
 
     const terminal = acceleration / dragCoefficient;
-    return terminal + (velocity - terminal) * Math.exp(-dragCoefficient * dtSeconds);
+    const retained = Math.pow(1 - dragCoefficient, frames);
+    return terminal + (velocity - terminal) * retained;
 }

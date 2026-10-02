@@ -23,11 +23,14 @@ export function knockbackVelocity(fromX, fromY, toX, toY, strength) {
 // Shared apply step for both the client (Phaser sprite/body) and the
 // headless simulation (raw Arcade Body): both only need an object with a
 // mutable {x, y} velocity, so this works without any Phaser GameObject.
-export function applyKnockbackToVelocity(velocity, fromX, fromY, toX, toY, strength, verticalScale = 1) {
+// `strength` is an impulse (velocity change for a mass-1 body): dv = strength / mass,
+// so heavier targets are pushed proportionally less by the same hit.
+export function applyKnockbackToVelocity(velocity, fromX, fromY, toX, toY, strength, { verticalScale = 1, mass = 1 } = {}) {
     const knock = knockbackVelocity(fromX, fromY, toX, toY, strength);
+    const invMass = 1 / Math.max(mass, 1e-6);
 
-    velocity.x += knock.vx;
-    velocity.y += knock.vy * verticalScale;
+    velocity.x += knock.vx * invMass;
+    velocity.y += knock.vy * verticalScale * invMass;
 
     return knock;
 }
