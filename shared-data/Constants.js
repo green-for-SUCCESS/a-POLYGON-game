@@ -68,7 +68,7 @@ export const SETTINGS = {
     // Terminal speed = force / (mass * drag) -> heavier enemies are slower AND harder to knock back.
     ENEMY_BASE_MASS: 1,
     ENEMY_MASS_GROWTH: 1.5,
-    ENEMY_BASE_MOVE_FORCE: 300,
+    ENEMY_BASE_MOVE_FORCE: 400,
     ENEMY_MOVE_FORCE_GROWTH: 1.5,
     ENEMY_DRAG_COEFFICIENT: 0.4,
     // Fraction of full move force used while patrolling (chasing uses full force).
@@ -96,8 +96,8 @@ export const SETTINGS = {
 
     PLAYER_BASE_MAX_HEALTH: 20,
     PLAYER_HEALTH_GROWTH: 1.05,
-    PLAYER_BASE_DAMAGE: 2,
-    PLAYER_DAMAGE_GROWTH: 1.05,
+    PLAYER_BASE_DAMAGE: 5,
+    PLAYER_DAMAGE_GROWTH: 1.15,
 
     // ---------------- FASTFALL ----------------
     PLAYER_FASTFALL_DAMAGE: 16,
