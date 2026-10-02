@@ -66,7 +66,7 @@ export function stepEnemyMovement(enemies, deltaMs) {
     const dt = Math.max(0, deltaMs) / 1000;
 
     for (const [, { body }] of enemies) {
-        const force = body.moveIntent * SETTINGS.ENEMY_MOVE_FORCE * body.moveForceScale;
+        const force = body.moveIntent * SETTINGS.ENEMY_BASE_MOVE_FORCE * SETTINGS.ENEMY_MOVE_FORCE_GROWTH ** body.rarity * body.moveForceScale;
 
         body.velocity.x = stepDragVelocity(
             body.velocity.x,

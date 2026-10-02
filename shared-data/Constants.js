@@ -68,7 +68,8 @@ export const SETTINGS = {
     // Terminal speed = force / (mass * drag) -> heavier enemies are slower AND harder to knock back.
     ENEMY_BASE_MASS: 1,
     ENEMY_MASS_GROWTH: 1.5,
-    ENEMY_MOVE_FORCE: 300,
+    ENEMY_BASE_MOVE_FORCE: 300,
+    ENEMY_MOVE_FORCE_GROWTH: 1.5,
     ENEMY_DRAG_COEFFICIENT: 0.4,
     // Fraction of full move force used while patrolling (chasing uses full force).
     ENEMY_PATROL_FORCE_SCALE: 0.27,
