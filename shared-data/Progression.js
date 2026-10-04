@@ -18,10 +18,10 @@ export function getEnemyStats(rarity) {
     const r = Math.max(0, rarity | 0);
 
     return {
-        health: Math.round(SETTINGS.ENEMY_BASE_HEALTH * SETTINGS.ENEMY_HEALTH_GROWTH ** r),
-        damage: Math.round(SETTINGS.ENEMY_BASE_DAMAGE * SETTINGS.ENEMY_DAMAGE_GROWTH ** r),
-        xp: Math.round(SETTINGS.ENEMY_BASE_XP * SETTINGS.ENEMY_XP_GROWTH ** r),
-        mass: SETTINGS.ENEMY_BASE_MASS * SETTINGS.ENEMY_MASS_GROWTH ** r,
+        health: Math.round(SETTINGS.ENEMY_BASE_HEALTH * SETTINGS.ENEMY_HEALTH_GROWTH ** (r + 1)),
+        damage: Math.round(SETTINGS.ENEMY_BASE_DAMAGE * SETTINGS.ENEMY_DAMAGE_GROWTH ** (r + 1)),
+        xp: Math.round(SETTINGS.ENEMY_BASE_XP * SETTINGS.ENEMY_XP_GROWTH ** (r + 1)),
+        mass: SETTINGS.ENEMY_BASE_MASS * SETTINGS.ENEMY_MASS_GROWTH ** (r + 1),
     };
 }
 
