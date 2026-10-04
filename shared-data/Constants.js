@@ -76,7 +76,7 @@ export const SETTINGS = {
     ENEMY_BASE_MASS: 1,
     ENEMY_MASS_GROWTH: 2.5,
     ENEMY_BASE_MOVE_FORCE: 400,
-    ENEMY_MOVE_FORCE_GROWTH: 1.5,
+    ENEMY_MOVE_FORCE_GROWTH: 2.5,
     ENEMY_HORIZONTAL_DRAG_COEFFICIENT: 0.4,
     // Small on purpose (mirrors PLAYER_VERTICAL_DRAG_COEFFICIENT): only caps
     // terminal fall speed a little and bleeds off vertical knockback over time.
