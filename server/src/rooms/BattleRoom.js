@@ -1,14 +1,47 @@
-import { Room } from "colyseus";
+import { Room, ServerError } from "colyseus";
 import { BattleRoomState } from "./schema/BattleRoomState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
+import { verifyIdToken, isUidBanned, banUsername } from "../firebaseAdmin.js";
 
 export class BattleRoom extends Room {
 
     state = new BattleRoomState();
 
+    // Rejects the connection before any room/player state is created for it.
+    // Returning a falsy value here fails the join with AUTH_FAILED.
+    async onAuth(client, options) {
+        const idToken = typeof options?.idToken === "string" ? options.idToken : null;
+        if (!idToken) {
+            // No verified identity presented — same as today's anonymous/guest
+            // play. A ban keyed only by a free-text username would be
+            // meaningless (trivially bypassed by renaming), so unverified
+            // connections simply aren't bannable yet.
+            return true;
+        }
+
+        const decoded = await verifyIdToken(idToken);
+        if (!decoded?.uid) {
+            // Token didn't verify; don't hard-fail the join over it, just
+            // treat them as unauthenticated (consistent with existing
+            // "guest" behavior elsewhere in this project).
+            return true;
+        }
+
+        if (await isUidBanned(decoded.uid)) {
+            throw new ServerError(403, "You are banned from this server.");
+        }
+
+        return { uid: decoded.uid };
+    }
+
     onCreate(options) {
+        // The world is an always-on simulation, not something that only exists
+        // while someone's connected: zones keep spawning/ticking with zero
+        // players, so don't let Colyseus tear the room down when it's empty.
+        this.autoDispose = false;
+
         this.game = new HeadlessGame();
         this.game.setPlayers(this.state.players);
 
@@ -28,6 +61,8 @@ export class BattleRoom extends Room {
             this.game.applyPlayerSlash(client.sessionId, data);
         });
 
+        this._registerDevMessages();
+
         this.setSimulationInterval((deltaTime) => {
             this.game.update(deltaTime);
             this._syncEnemies();
@@ -35,6 +70,101 @@ export class BattleRoom extends Room {
             this._dispatchFastfallDenials();
             this._dispatchPersists();
         });
+    }
+
+    // ---------------------------------------------------------------
+    // Developer-only commands. `isDeveloper` is set in onJoin only when the
+    // connecting client presented a devToken that matches the server's own
+    // DEV_SECRET — never trusted from the client beyond that one check, and
+    // every handler re-checks it (a normal production client never sends a
+    // devToken at all, so it never gets this flag in the first place).
+    // ---------------------------------------------------------------
+    _registerDevMessages() {
+        this.onMessage("devAdjustLevel", (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            const delta = Math.trunc(Number(data?.delta) || 0);
+            if (delta === 0) {
+                return;
+            }
+
+            this.game.devAdjustLevel(client.sessionId, delta);
+        });
+
+        this.onMessage("devResetLevel", (client) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this.game.devResetLevel(client.sessionId);
+        });
+
+        this.onMessage("devKick", (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, this._handleDevKick(String(data?.username || "")));
+        });
+
+        this.onMessage("devBan", async (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, await this._handleDevBan(String(data?.username || "")));
+        });
+    }
+
+    _devReply(client, message) {
+        client.send("devReply", { message });
+    }
+
+    _findSessionIdByUsername(username) {
+        const needle = username.trim().toLowerCase();
+        if (!needle) {
+            return null;
+        }
+
+        for (const [sessionId, player] of this.state.players) {
+            if ((player.name || "").toLowerCase() === needle) {
+                return sessionId;
+            }
+        }
+
+        return null;
+    }
+
+    _handleDevKick(username) {
+        const sessionId = this._findSessionIdByUsername(username);
+        if (!sessionId) {
+            return `Player not found: "${username}"`;
+        }
+
+        const target = this.clients.find((c) => c.sessionId === sessionId);
+        if (!target) {
+            return `Player not found: "${username}"`;
+        }
+
+        target.send("devKicked", { reason: "Kicked by a developer." });
+        target.leave(4000, "Kicked by a developer.");
+
+        return `Kicked "${username}".`;
+    }
+
+    async _handleDevBan(username) {
+        // Also kick them immediately if they're currently connected — the
+        // ban record alone only blocks *future* verified-identity joins.
+        this._handleDevKick(username);
+
+        const result = await banUsername(username.trim());
+        if (!result.ok) {
+            return `Ban failed: ${result.error}`;
+        }
+
+        return `Banned "${username}" (uid ${result.uid}).`;
     }
 
     _dispatchFastfallDenials() {
@@ -123,6 +253,17 @@ export class BattleRoom extends Room {
         this.game.applyRunStart(player);
 
         this.state.players.set(client.sessionId, player);
+
+        // Developer authorization: only ever granted server-side, only when
+        // DEV_SECRET is actually configured and the presented token matches
+        // it exactly. A normal production client build never sends a
+        // devToken at all, so this never fires for regular players even if
+        // someone inspects/forges messages against the normal client.
+        const devSecret = process.env.DEV_SECRET;
+        const presented = typeof options?.devToken === "string" ? options.devToken : null;
+        client.userData = {
+            isDeveloper: Boolean(devSecret && presented && presented === devSecret),
+        };
 
         console.log("Players in room:", this.state.players);
         console.log("Player added:", client.sessionId);

@@ -62,6 +62,22 @@ export function getRunXPTotal(persistentXP, runXP) {
     return Math.max(0, Number(persistentXP) || 0) + Math.max(0, Number(runXP) || 0);
 }
 
+// Single source of truth for "level + progress bar" math, used by the in-game
+// HUD and the Home screen alike, so they can never disagree. Safe for xp=0,
+// exactly-on-boundary xp, and arbitrarily large xp (no NaN/Infinity: span is
+// clamped to >= 0 and division is guarded).
+export function getLevelProgress(xp) {
+    const amount = Math.max(0, Number(xp) || 0);
+    const level = getLevelFromXP(amount);
+    const levelStartXP = getTotalXPForLevel(level);
+    const levelEndXP = getTotalXPForLevel(level + 1);
+    const intoLevel = Math.max(0, amount - levelStartXP);
+    const span = Math.max(0, levelEndXP - levelStartXP);
+    const progress = span > 0 ? Math.min(1, intoLevel / span) : 1;
+
+    return { level, xp: amount, intoLevel, span, progress };
+}
+
 // The one place that turns a player's authoritative (xp, runXP) into their
 // current level, so the HUD, polygon shape, etc. never compute it differently.
 export function getPlayerLevelFromState(state) {

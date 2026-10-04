@@ -3,8 +3,8 @@ import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
-import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
-import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd, getZoneAtX } from "../../../shared-data/Zones.js";
+import { getEnemyStats, getPlayerStatsFromXP, getLevelFromXP, getTotalXPForLevel, rollEnemyRarity } from "../../../shared-data/Progression.js";
+import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
 
@@ -73,6 +73,7 @@ export class HeadlessGame {
         player.fastfallDenied = false;
         player.slashCooldownRemaining = 0;
         player.runEnded = false;
+        player._devOriginalXP = null;
     }
 
     applyPlayerInput(sessionId, data) {
@@ -201,6 +202,51 @@ export class HeadlessGame {
         this.applyRunStart(player);
     }
 
+    // ---------------------------------------------------------------
+    // Developer-only playtesting controls (BattleRoom only calls these
+    // after verifying the connection authenticated as a developer).
+    // These mutate the real authoritative state (xp -> stats -> polygon,
+    // all through the normal paths), but never touch Firestore directly —
+    // the dev's REAL persisted XP is remembered the first time any dev
+    // command runs this session, and that original value (not whatever
+    // the dev set it to) is what eventually gets persisted in _endRun,
+    // so playtesting can't accidentally overwrite real progression.
+    // ---------------------------------------------------------------
+    _setDevXP(player, xp) {
+        if (player._devOriginalXP == null) {
+            player._devOriginalXP = player.xp || 0;
+        }
+
+        player.xp = Math.max(0, Math.floor(xp));
+
+        const stats = getPlayerStatsFromXP(player.xp);
+        player._stats = stats;
+        player.maxHealth = stats.maxHealth;
+        if (player.health > 0) {
+            player.health = stats.maxHealth;
+        }
+    }
+
+    devAdjustLevel(sessionId, delta) {
+        const player = this.players?.get(sessionId);
+        if (!player || !Number.isFinite(delta)) {
+            return;
+        }
+
+        const currentLevel = getLevelFromXP(player.xp || 0);
+        const targetLevel = Math.max(1, currentLevel + Math.trunc(delta));
+        this._setDevXP(player, getTotalXPForLevel(targetLevel));
+    }
+
+    devResetLevel(sessionId) {
+        const player = this.players?.get(sessionId);
+        if (!player) {
+            return;
+        }
+
+        this._setDevXP(player, 0);
+    }
+
     update(deltaMs) {
         if (this.players) {
             for (const [, player] of this.players) {
@@ -237,15 +283,15 @@ export class HeadlessGame {
         this._collectDeaths();
     }
 
+    // Zones simulate continuously, with or without anyone present — the world
+    // doesn't wait for a player to "turn a zone on". Spawn probability is pure
+    // time-based (1 - (1-chancePerSecond)^dt), the same math regardless of
+    // who's watching, so a zone left running for an hour alone behaves exactly
+    // like the same hour with a player standing in it.
     _trySpawnEnemies(deltaMs) {
         const dt = Math.max(0, deltaMs) / 1000;
-        const occupied = this._occupiedCombatZoneIds();
 
         for (const zone of getCombatZones()) {
-            if (!occupied.has(zone.id)) {
-                continue;
-            }
-
             if (this.enemies.size >= SETTINGS.MAX_ENEMIES) {
                 return;
             }
@@ -261,26 +307,6 @@ export class HeadlessGame {
 
             this.spawnEnemyInZone(zone);
         }
-    }
-
-    _occupiedCombatZoneIds() {
-        const occupied = new Set();
-        if (!this.players) {
-            return occupied;
-        }
-
-        for (const [, player] of this.players) {
-            if (player.health <= 0 || !player.spawnExited) {
-                continue;
-            }
-
-            const zone = getZoneAtX(player.x);
-            if (zone && !zone.protected) {
-                occupied.add(zone.id);
-            }
-        }
-
-        return occupied;
     }
 
     _countEnemiesInZone(zone) {
@@ -414,8 +440,14 @@ export class HeadlessGame {
 
         player.runEnded = true;
         player.health = 0;
-        player.xp = (player.xp || 0) + (player.runXP || 0);
+
+        // If a dev command ever touched this player's xp this session, persist
+        // their real pre-testing xp (+ whatever they actually earned this run)
+        // instead of whatever level the dev tools happened to leave them at.
+        const baselineXP = player._devOriginalXP != null ? player._devOriginalXP : (player.xp || 0);
+        player.xp = baselineXP + (player.runXP || 0);
         player.runXP = 0;
+        player._devOriginalXP = null;
 
         this.pendingPersists.push({
             sessionId,

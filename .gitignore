@@ -12,6 +12,7 @@
 .env
 .env.*
 !.env.example
+!.env.devtools.example
 
 
 # =====================================================
@@ -30,6 +31,7 @@ pnpm-debug.log*
 # =====================================================
 
 **/dist/
+**/dist-dev/
 **/build/
 **/.cache/
 **/.parcel-cache/

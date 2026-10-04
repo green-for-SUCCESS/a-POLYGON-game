@@ -9,6 +9,7 @@ import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
 import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
+import { isDevBuild } from "../Dev/DevFlag.js";
 
 export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
 
@@ -16,6 +17,7 @@ export async function connect() {
     try {
         let username = variable.username || "";
         let xp = variable.persistentXP || 0;
+        let idToken = null;
 
         try {
             const session = await getSession();
@@ -27,10 +29,26 @@ export async function connect() {
                 xp = session.xp;
                 variable.persistentXP = session.xp;
             }
+            if (session?.user) {
+                // Lets the server verify who this is (for ban checks) instead
+                // of trusting the free-text username alone. Safe to send from
+                // every build: it's the player's own per-session token, not a
+                // secret, and the server only uses it to read their uid.
+                idToken = await session.user.getIdToken();
+            }
         } catch {
         }
 
-        const room = await client.joinOrCreate("battle", { username, xp });
+        const joinOptions = { username, xp, idToken };
+
+        // Only the separate developer build ever sets isDevBuild(true), and
+        // only that build's own env has VITE_DEV_SECRET — a normal production
+        // build has neither, so this is always omitted for real players.
+        if (isDevBuild() && import.meta.env.VITE_DEV_SECRET) {
+            joinOptions.devToken = import.meta.env.VITE_DEV_SECRET;
+        }
+
+        const room = await client.joinOrCreate("battle", joinOptions);
 
         console.log("✅ Connected!");
         console.log("Room:", room.roomId);

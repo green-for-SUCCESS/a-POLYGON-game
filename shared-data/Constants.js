@@ -58,7 +58,7 @@ export const SETTINGS = {
     ENEMY_SIDE_LENGTH: 50,
 
     // ---------------- ENEMY STATS ----------------
-    ENEMY_BASE_HEALTH: 48,
+    ENEMY_BASE_HEALTH: 16,
     ENEMY_HEALTH_GROWTH: 2.5,
     ENEMY_BASE_DAMAGE: 2,
     ENEMY_DAMAGE_GROWTH: 2.5,
@@ -74,7 +74,7 @@ export const SETTINGS = {
     // the rarity-scaled property: mass = ENEMY_BASE_MASS * ENEMY_MASS_GROWTH ** rarity.
     // Terminal speed = force / (mass * drag) -> heavier enemies are slower AND harder to knock back.
     ENEMY_BASE_MASS: 1,
-    ENEMY_MASS_GROWTH: 1.5,
+    ENEMY_MASS_GROWTH: 2.5,
     ENEMY_BASE_MOVE_FORCE: 400,
     ENEMY_MOVE_FORCE_GROWTH: 1.5,
     ENEMY_HORIZONTAL_DRAG_COEFFICIENT: 0.4,

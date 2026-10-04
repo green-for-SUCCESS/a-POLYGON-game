@@ -1,4 +1,5 @@
 import { getSession, signOut } from "../Multiplayer/FirebaseConfig.js";
+import { getLevelProgress } from "../../../../shared-data/Progression.js";
 import { variable } from "../GameValues/LocalVariables.js";
 
 // =====================================================
@@ -140,6 +141,66 @@ export function createHome(session) {
             await signOut();
             scene.scene.restart();
         });
+    }
+
+    // =================================================
+    // LEVEL / XP PROGRESS (same progression logic as in-game, derived from
+    // the player's authoritative persistent XP — no gameplay/server needed)
+    // =================================================
+
+    const barW = 320;
+    const barH = 22;
+    const barX = width / 2 - barW / 2;
+    const barY = height * 0.56;
+
+    if (isLoggedIn) {
+        const { level, intoLevel, span, progress } = getLevelProgress(session.xp);
+
+        const levelLabel = this.add.text(
+            width / 2,
+            barY - 30,
+            `Level ${level}`,
+            {
+                fontSize: "28px",
+                fontFamily: "Ubuntu",
+                color: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 4
+            }
+        );
+        levelLabel.setOrigin(0.5);
+
+        const barBg = this.add.rectangle(barX, barY, barW, barH, 0x222222);
+        barBg.setOrigin(0, 0.5);
+        barBg.setStrokeStyle(2, 0xffffff, 0.8);
+
+        const barFillW = Math.max(0, Math.min(barW, barW * progress));
+        const barFill = this.add.rectangle(barX, barY, barFillW, barH, 0x4a9dff);
+        barFill.setOrigin(0, 0.5);
+
+        const xpLabel = this.add.text(
+            width / 2,
+            barY + 24,
+            `${Math.floor(intoLevel)} / ${Math.floor(span)} XP`,
+            {
+                fontSize: "16px",
+                fontFamily: "Ubuntu",
+                color: "#cccccc"
+            }
+        );
+        xpLabel.setOrigin(0.5);
+    } else {
+        const hint = this.add.text(
+            width / 2,
+            barY,
+            "Sign in to track your level and XP.",
+            {
+                fontSize: "18px",
+                fontFamily: "Ubuntu",
+                color: "#999999"
+            }
+        );
+        hint.setOrigin(0.5);
     }
 
     // =================================================
