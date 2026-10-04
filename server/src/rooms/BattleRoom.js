@@ -305,6 +305,32 @@ export class BattleRoom extends Room {
         console.log(client.sessionId, "joined!");
     }
 
+    // This is the actual root cause of "a brief internet drop kills the
+    // whole session": Colyseus calls onDrop() (not onLeave()) for an abrupt
+    // disconnect, specifically so allowReconnection() can be offered here.
+    // Without this, the client's seat is torn down the instant the socket
+    // closes, so the SDK's own automatic reconnect (already on by default —
+    // exponential backoff, up to 15 attempts) always arrives to find nothing
+    // to reconnect to, failing immediately with "seat reservation expired"
+    // (confirmed by direct testing before this fix).
+    async onDrop(client) {
+        // Covers the SDK's own ~15-attempt exponential-backoff retry window
+        // with room to spare. PlayerState is left completely untouched while
+        // this is pending — Colyseus skips onJoin() on a successful
+        // reconnect (calling onReconnect instead, which we don't need), so
+        // the run just resumes exactly where it left off.
+        try {
+            await this.allowReconnection(client, 30);
+        } catch {
+            // Reconnection window expired or failed; onLeave() below (which
+            // Colyseus calls automatically once this rejects) does the
+            // actual cleanup.
+        }
+    }
+
+    // Called once a player is truly gone: either they left on purpose (the
+    // "Main Menu" button, which calls room.leave() -> CloseCode.CONSENTED),
+    // or onDrop()'s reconnection window above expired/failed.
     onLeave(client) {
         this.state.players.delete(client.sessionId);
     }

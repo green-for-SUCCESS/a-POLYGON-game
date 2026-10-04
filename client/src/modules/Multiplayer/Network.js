@@ -1,5 +1,5 @@
 import * as Colyseus from "@colyseus/sdk";
-import { Callbacks } from "@colyseus/sdk";
+import { Callbacks, CloseCode } from "@colyseus/sdk";
 
 import { variable } from "../GameValues/LocalVariables.js";
 
@@ -10,51 +10,141 @@ import { playSlashEffect } from "../Entities/Effects.js";
 import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
+import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
 
 export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
 
+// Serializes connection attempts: a stray second call to connect() (e.g. a
+// manual retry click landing while an auto-retry is still in flight) must
+// never race a second joinOrCreate() for the same player, which is how you
+// end up with two separate rooms/listener sets for one player.
+let connecting = false;
+const MAX_AUTO_RETRIES = 5;
+
 export async function connect() {
+    if (connecting) {
+        return;
+    }
+
+    connecting = true;
     try {
-        let username = variable.username || "";
-        let xp = variable.persistentXP || 0;
-        let idToken = null;
+        return await connectWithRetry();
+    } finally {
+        connecting = false;
+    }
+}
 
+// The initial join is the one network call nothing else here recovers from
+// on its own (unlike a mid-session drop, which Colyseus's own reconnection —
+// now that the server actually grants a reconnection window, see
+// BattleRoom.onDrop — already handles). A handful of short, backed-off
+// retries covers a brief "server not reachable yet" blip; past that, this
+// waits for an explicit click rather than retrying forever in the background.
+async function connectWithRetry() {
+    let attempt = 0;
+
+    for (;;) {
         try {
-            const session = await getSession();
-            if (session?.username) {
-                username = session.username;
-                variable.username = session.username;
+            const room = await attemptConnect();
+            hideConnectionStatus();
+            return room;
+        } catch (e) {
+            attempt++;
+            console.error(`❌ Connection attempt ${attempt} failed:`, e);
+
+            if (attempt >= MAX_AUTO_RETRIES) {
+                await new Promise((resolve) => {
+                    showConnectionStatus("Couldn't reach the server. Click to retry.", "error", () => {
+                        attempt = 0;
+                        resolve();
+                    });
+                });
+                continue;
             }
-            if (session?.xp != null) {
-                xp = session.xp;
-                variable.persistentXP = session.xp;
-            }
-            if (session?.user) {
-                // Lets the server verify who this is (for ban checks) instead
-                // of trusting the free-text username alone. Safe to send from
-                // every build: it's the player's own per-session token, not a
-                // secret, and the server only uses it to read their uid.
-                idToken = await session.user.getIdToken();
-            }
-        } catch {
+
+            const delaySeconds = Math.min(10, 2 ** (attempt - 1));
+            showConnectionStatus(`Connecting to the server… retrying in ${delaySeconds}s`, "warn");
+            await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+        }
+    }
+}
+
+async function attemptConnect() {
+    let username = variable.username || "";
+    let xp = variable.persistentXP || 0;
+    let idToken = null;
+
+    try {
+        const session = await getSession();
+        if (session?.username) {
+            username = session.username;
+            variable.username = session.username;
+        }
+        if (session?.xp != null) {
+            xp = session.xp;
+            variable.persistentXP = session.xp;
+        }
+        if (session?.user) {
+            // Lets the server verify who this is (for ban checks) instead
+            // of trusting the free-text username alone. Safe to send from
+            // every build: it's the player's own per-session token, not a
+            // secret, and the server only uses it to read their uid.
+            idToken = await session.user.getIdToken();
+        }
+    } catch {
+    }
+
+    const joinOptions = { username, xp, idToken };
+
+    // Only the separate developer build ever sets isDevBuild(true), and
+    // only that build's own env has VITE_DEV_SECRET — a normal production
+    // build has neither, so this is always omitted for real players.
+    if (isDevBuild() && import.meta.env.VITE_DEV_SECRET) {
+        joinOptions.devToken = import.meta.env.VITE_DEV_SECRET;
+    }
+
+    const room = await client.joinOrCreate("battle", joinOptions);
+
+    console.log("✅ Connected!");
+    console.log("Room:", room.roomId);
+
+    variable.room = room
+    variable.playerId = room.sessionId;
+
+    // The room object (and everything registered on it below) survives a
+    // brief drop automatically — Colyseus's client reconnects the same Room
+    // instance with exponential backoff, and the server now grants it a
+    // real reconnection window (BattleRoom.onDrop), so none of these
+    // listeners get re-registered or duplicated by a reconnect. Only a
+    // genuinely new connect() call (this function running again) would ever
+    // create a second set, and `connecting` above prevents that overlapping
+    // with an in-progress one.
+    room.onDrop(() => {
+        showConnectionStatus("Connection lost — reconnecting…", "warn");
+    });
+
+    room.onReconnect(() => {
+        hideConnectionStatus();
+    });
+
+    room.onLeave((code) => {
+        // A leave we asked for ourselves (the "Main Menu" button calls
+        // room.leave(), which closes with CloseCode.CONSENTED) is expected
+        // navigation, not a failure — don't show anything for it. Anything
+        // else here means reconnection was exhausted or never possible
+        // (e.g. the drop happened in the first few seconds of the room's
+        // life), which is a genuine disconnect worth being honest about
+        // rather than leaving the game silently frozen.
+        if (code === CloseCode.CONSENTED) {
+            return;
         }
 
-        const joinOptions = { username, xp, idToken };
-
-        // Only the separate developer build ever sets isDevBuild(true), and
-        // only that build's own env has VITE_DEV_SECRET — a normal production
-        // build has neither, so this is always omitted for real players.
-        if (isDevBuild() && import.meta.env.VITE_DEV_SECRET) {
-            joinOptions.devToken = import.meta.env.VITE_DEV_SECRET;
-        }
-
-        const room = await client.joinOrCreate("battle", joinOptions);
-
-        console.log("✅ Connected!");
-        console.log("Room:", room.roomId);
-
-        variable.room = room
-        variable.playerId = room.sessionId;
+        variable.room = null;
+        showConnectionStatus("Disconnected from server. Click to reconnect.", "error", () => {
+            hideConnectionStatus();
+            connect();
+        });
+    });
 
         room.onMessage("knockback", (data) => {
             if (!variable.player?.active || !variable.player.body) {
@@ -181,14 +271,7 @@ export async function connect() {
             destroyPlayer(sessionId);
         });
         
-        return room;
-    }
-    catch (e) {
-        console.error("❌ Connection failed:", e);
-        if (e && e.data) {
-            console.log("Server response:", e.data);
-        }
-    }
+    return room;
 }
 
 function applyLocalPlayerState(playerState) {
