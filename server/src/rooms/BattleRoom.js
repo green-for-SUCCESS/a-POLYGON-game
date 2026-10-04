@@ -44,6 +44,7 @@ export class BattleRoom extends Room {
 
         this.game = new HeadlessGame();
         this.game.setPlayers(this.state.players);
+        this._pendingDevAuthResults = [];
 
         this.onMessage("updatePosition", (client, data) => {
             this.game.applyPlayerInput(client.sessionId, data);
@@ -69,7 +70,23 @@ export class BattleRoom extends Room {
             this._dispatchKnockbacks();
             this._dispatchFastfallDenials();
             this._dispatchPersists();
+            this._dispatchDevAuthResults();
         });
+    }
+
+    // Sending this straight from onJoin races the client: the server can
+    // dispatch it before the client's joinOrCreate() promise even resolves,
+    // which is before Network.js/DevTools.js get a chance to call
+    // room.onMessage(...) for it — so it arrives with nothing listening and
+    // is silently dropped. Queuing it and flushing on the next simulation
+    // tick (same pattern as knockback/persistXP below) guarantees the client
+    // has long since registered its listeners by the time it's sent.
+    _dispatchDevAuthResults() {
+        for (const event of this._pendingDevAuthResults) {
+            const client = this.clients.find((c) => c.sessionId === event.sessionId);
+            client?.send("devAuthResult", { ok: event.ok, reason: event.reason });
+        }
+        this._pendingDevAuthResults = [];
     }
 
     // ---------------------------------------------------------------
@@ -264,6 +281,24 @@ export class BattleRoom extends Room {
         client.userData = {
             isDeveloper: Boolean(devSecret && presented && presented === devSecret),
         };
+
+        // A dev-build client always presents SOME devToken (even an empty one
+        // would be a bug in the build), so this only ever fires for clients
+        // that are actually trying to authenticate as a developer. Without
+        // this, a devToken/DEV_SECRET mismatch fails completely silently —
+        // every K/L/R press and every admin command just does nothing, with
+        // no way to tell "this is broken" from "this never happened".
+        if (presented != null) {
+            this._pendingDevAuthResults.push({
+                sessionId: client.sessionId,
+                ok: client.userData.isDeveloper,
+                reason: !devSecret
+                    ? "Server has no DEV_SECRET configured."
+                    : !client.userData.isDeveloper
+                        ? "devToken did not match the server's DEV_SECRET."
+                        : null,
+            });
+        }
 
         console.log("Players in room:", this.state.players);
         console.log("Player added:", client.sessionId);

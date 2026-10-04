@@ -45,4 +45,10 @@ export const variable = {
     persistentXP: 0,
     runXP: 0,
     allBlocks: [],
+    // Harmless in a normal build (never pushed to — the server only sends
+    // dev-* messages to a client that presented a devToken). The dev
+    // console (modules/Dev/DevTools.js) drains this; kept here instead of
+    // in that dev-only module so Network.js can register the listener
+    // immediately on connect without importing dev-only UI code.
+    devLog: [],
 }

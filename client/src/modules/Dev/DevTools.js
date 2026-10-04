@@ -109,19 +109,18 @@ function _runCommand(text) {
     }
 }
 
-// The room connects/disconnects as the player moves between scenes and
-// reconnects; this attaches the dev-reply listeners to whichever room
-// instance is currently live, without depending on Network.js internals.
+// Network.js registers the actual room.onMessage(...) listeners for
+// devAuthResult/devReply/devKicked the instant the room connects (it has to:
+// devAuthResult can arrive within one simulation tick of joining, long
+// before this UI module's own setup would notice a new room exists). It
+// just pushes strings into variable.devLog; all this does is display them,
+// so nothing is ever dropped waiting for this console to catch up.
 function _watchRoomForDevMessages() {
-    let lastRoom = null;
-
     setInterval(() => {
-        if (variable.room && variable.room !== lastRoom) {
-            lastRoom = variable.room;
-            variable.room.onMessage("devReply", (data) => _log(String(data?.message ?? "")));
-            variable.room.onMessage("devKicked", (data) => _log("You were kicked: " + (data?.reason || "no reason given")));
+        while (variable.devLog && variable.devLog.length) {
+            _log(variable.devLog.shift());
         }
-    }, 500);
+    }, 150);
 }
 
 function _isTypingInTextField() {

@@ -79,6 +79,28 @@ export async function connect() {
             }
         });
 
+        // Registered here (not in DevTools.js, which only polls for the
+        // room every 500ms to build its UI) so the listener exists the
+        // instant the room does — these can arrive within one simulation
+        // tick of joining, which is faster than that poll would notice.
+        // No-ops for a normal build/player: the server only ever sends
+        // these to a client that presented a devToken on join.
+        room.onMessage("devAuthResult", (data) => {
+            variable.devLog.push(
+                data?.ok
+                    ? "✓ Developer authorization confirmed — K/L/R and commands are live."
+                    : "✗ Developer authorization FAILED: " + (data?.reason || "unknown reason") + " K/L/R and commands will do nothing."
+            );
+        });
+
+        room.onMessage("devReply", (data) => {
+            variable.devLog.push(String(data?.message ?? ""));
+        });
+
+        room.onMessage("devKicked", (data) => {
+            variable.devLog.push("You were kicked: " + (data?.reason || "no reason given"));
+        });
+
         room.onMessage("persistXP", (data) => {
             const nextXP = Math.max(0, Math.floor(Number(data?.xp) || 0));
             variable.persistentXP = nextXP;
