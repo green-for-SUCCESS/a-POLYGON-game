@@ -62,6 +62,12 @@ export function getRunXPTotal(persistentXP, runXP) {
     return Math.max(0, Number(persistentXP) || 0) + Math.max(0, Number(runXP) || 0);
 }
 
+// The one place that turns a player's authoritative (xp, runXP) into their
+// current level, so the HUD, polygon shape, etc. never compute it differently.
+export function getPlayerLevelFromState(state) {
+    return getLevelFromXP(getRunXPTotal(state?.xp, state?.runXP));
+}
+
 export function getPlayerStats(level) {
     const t = Math.max(0, (level | 0) - 1);
 

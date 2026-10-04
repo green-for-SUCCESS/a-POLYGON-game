@@ -57,3 +57,40 @@ export function getRegularPolygonMetrics(sides, sideLength = SETTINGS.ENEMY_SIDE
 export function getEnemyBodyMetrics(rarity) {
     return getRegularPolygonMetrics(getEnemySides(rarity));
 }
+
+// Area of a regular polygon: A = n * s^2 / (4 * tan(pi/n))
+export function getRegularPolygonArea(sideLength, sides) {
+    return (sides * sideLength * sideLength) / (4 * Math.tan(Math.PI / sides));
+}
+
+// Inverse of the above: the side length that gives a regular n-gon area A.
+export function getRegularPolygonSideForArea(area, sides) {
+    return Math.sqrt((area * 4 * Math.tan(Math.PI / sides)) / sides);
+}
+
+const PLAYER_MIN_SIDES = 3;
+const PLAYER_MAX_SIDES = 7;
+
+// Level 1 -> triangle, Level 5+ -> heptagon (capped). Never more than 7 sides.
+export function getPlayerSides(level) {
+    const lvl = Math.max(1, level | 0);
+    return Math.min(PLAYER_MIN_SIDES + (lvl - 1), PLAYER_MAX_SIDES);
+}
+
+// The player's Level-1 triangle is defined to be IDENTICAL to the enemy
+// Triangle (rarity 0): same side count, same side length, same area. Every
+// later level keeps this exact area while gaining sides, so the polygon gets
+// rounder (and its side length shrinks) but never bigger or smaller overall.
+export function getPlayerTargetArea() {
+    return getRegularPolygonArea(SETTINGS.ENEMY_SIDE_LENGTH, PLAYER_MIN_SIDES);
+}
+
+export function getPlayerSideLength(level) {
+    return getRegularPolygonSideForArea(getPlayerTargetArea(), getPlayerSides(level));
+}
+
+export function getPlayerPolygonMetrics(level) {
+    const sides = getPlayerSides(level);
+    const sideLength = getPlayerSideLength(level);
+    return { sides, sideLength, ...getRegularPolygonMetrics(sides, sideLength) };
+}

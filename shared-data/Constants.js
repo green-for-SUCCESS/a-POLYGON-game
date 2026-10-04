@@ -9,6 +9,13 @@ export const SETTINGS = {
     WORLD_HEIGHT: 2080,
     GRAVITY: 2000,
 
+    // Arcade physics only tests AABB overlap once per step; if a body would
+    // travel further than the ground/platform thickness in one step, it can
+    // tunnel straight through. A higher fixed-step rate keeps per-step travel
+    // small regardless of velocity. Used by both the headless World and the
+    // client's Phaser game config (see Game.js), so both agree.
+    PHYSICS_FPS: 240,
+
     // ---------------- ENTITIES ----------------
     ENTITY_SPAWN_HEIGHT: 1800,
 
@@ -18,7 +25,7 @@ export const SETTINGS = {
 
     PLAYER_MASS: 1,
     PLAYER_MOVE_FORCE: 300,
-    PLAYER_DRAG_COEFFICIENT: 0.4,
+    PLAYER_HORIZONTAL_DRAG_COEFFICIENT: 0.4,
     PLAYER_VERTICAL_DRAG_COEFFICIENT: 0.015,
     PLAYER_FASTFALL_SPEED: 3000,
     JUMP_STRENGTH: -1250,
@@ -70,7 +77,11 @@ export const SETTINGS = {
     ENEMY_MASS_GROWTH: 1.5,
     ENEMY_BASE_MOVE_FORCE: 400,
     ENEMY_MOVE_FORCE_GROWTH: 1.5,
-    ENEMY_DRAG_COEFFICIENT: 0.4,
+    ENEMY_HORIZONTAL_DRAG_COEFFICIENT: 0.4,
+    // Small on purpose (mirrors PLAYER_VERTICAL_DRAG_COEFFICIENT): only caps
+    // terminal fall speed a little and bleeds off vertical knockback over time.
+    // Gravity still dominates; this never blocks a fall or a knockback pop.
+    ENEMY_VERTICAL_DRAG_COEFFICIENT: 0.015,
     // Fraction of full move force used while patrolling (chasing uses full force).
     ENEMY_PATROL_FORCE_SCALE: 0.27,
 

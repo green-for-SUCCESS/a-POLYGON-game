@@ -66,13 +66,24 @@ export function stepEnemyMovement(enemies, deltaMs) {
     const dt = Math.max(0, deltaMs) / 1000;
 
     for (const [, { body }] of enemies) {
-        const force = body.moveIntent * SETTINGS.ENEMY_BASE_MOVE_FORCE * SETTINGS.ENEMY_MOVE_FORCE_GROWTH ** body.rarity * body.moveForceScale;
+        const force = body.moveIntent * SETTINGS.ENEMY_BASE_MOVE_FORCE * SETTINGS.ENEMY_MOVE_FORCE_GROWTH ** (body.rarity + 1) * body.moveForceScale;
 
         body.velocity.x = stepDragVelocity(
             body.velocity.x,
             force,
             body.mass,
-            SETTINGS.ENEMY_DRAG_COEFFICIENT,
+            SETTINGS.ENEMY_HORIZONTAL_DRAG_COEFFICIENT,
+            dt
+        );
+
+        // No horizontal-style "move force" vertically (gravity/knockback drive
+        // vy); zero force here just lets drag gently cap fall speed and bleed
+        // off vertical knockback, exactly like the player's own vertical drag.
+        body.velocity.y = stepDragVelocity(
+            body.velocity.y,
+            0,
+            body.mass,
+            SETTINGS.ENEMY_VERTICAL_DRAG_COEFFICIENT,
             dt
         );
     }

@@ -2,22 +2,62 @@ import Phaser from "phaser";
 
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
-import { getLevelFromXP, getRunXPTotal, getTotalXPForLevel } from "../../../../shared-data/Progression.js";
+import { getLevelFromXP, getRunXPTotal, getTotalXPForLevel, getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
+import { getPlayerSides, getPlayerSideLength, getRegularPolygonRadius, getRegularPolygonMetrics } from "../../../../shared-data/Geometry.js";
 import { getSpawnZoneEnd } from "../../../../shared-data/Zones.js";
 import { variable } from "../GameValues/LocalVariables.js";
 import { shatterAt } from "./Effects.js";
 
 // =====================================================
+// PLAYER POLYGON (level -> sides, constant area)
+// =====================================================
+
+// Purely cosmetic (+ this client's own, non-authoritative collision box):
+// the level that drives this comes from the server's synced xp/runXP.
+export function applyPlayerPolygon(player, level) {
+    const sides = getPlayerSides(level);
+    if (player.sides === sides) {
+        return;
+    }
+
+    const sideLength = getPlayerSideLength(level);
+    const radius = getRegularPolygonRadius(sides, sideLength);
+    const metrics = getRegularPolygonMetrics(sides, sideLength);
+    const displaySize = radius * 2;
+    const sprite = player.sprite;
+
+    sprite.setTexture(`player-${sides}`);
+    sprite.setDisplaySize(displaySize, displaySize);
+
+    if (sprite.body) {
+        sprite.body.setSize(metrics.width, metrics.height, true);
+
+        if (player.bodyHeight != null) {
+            // Keep the polygon's bottom edge anchored where it was: area is
+            // constant across levels, but the bounding-box height still
+            // changes shape to shape, so without this the sprite would pop
+            // up/down relative to the ground on every level-up.
+            sprite.y -= (metrics.height - player.bodyHeight) / 2;
+        }
+    }
+
+    player.sides = sides;
+    player.bodyHeight = metrics.height;
+}
+
+// =====================================================
 // CREATE PLAYER
 // =====================================================
 
-export function createPlayer(id, x, y,) {
+export function createPlayer(id, x, y, playerState) {
     const isLocal = (id === variable.playerId);
+    const level = getPlayerLevelFromState(playerState);
+    const sides = getPlayerSides(level);
 
     const sprite = variable.sceneRef.physics.add.sprite(
         x,
         y,
-        "player"
+        `player-${sides}`
     );
 
     sprite.setCollideWorldBounds(true);
@@ -32,6 +72,8 @@ export function createPlayer(id, x, y,) {
         targetX: x,
         targetY: y
     };
+
+    applyPlayerPolygon(player, level);
 
     variable.allPlayers[id] = player;
 
@@ -371,7 +413,7 @@ export function playerMovementCheck() {
         }
 
         const dragAccelX =
-            SETTINGS.PLAYER_DRAG_COEFFICIENT *
+            SETTINGS.PLAYER_HORIZONTAL_DRAG_COEFFICIENT *
             variable.player.body.velocity.x;
 
         accelX -= dragAccelX;

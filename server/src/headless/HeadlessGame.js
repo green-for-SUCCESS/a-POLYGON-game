@@ -24,7 +24,12 @@ export class HeadlessGame {
             gravity: { x: 0, y: SETTINGS.GRAVITY },
             width: SETTINGS.WORLD_WIDTH,
             height: SETTINGS.WORLD_HEIGHT,
+            // See PHYSICS_FPS: a fixed-step rate high enough that no body can
+            // cross the ground's thickness within a single physics substep.
+            fps: SETTINGS.PHYSICS_FPS,
         });
+
+        this._simTimeMs = 0;
 
         this.enemies = new Map();
         this.players = null;
@@ -222,7 +227,13 @@ export class HeadlessGame {
 
         stepEnemyMovement(this.enemies, deltaMs);
 
-        this.world.step(deltaMs / 1000);
+        // world.update() (not world.step()) is what makes this safe at high
+        // velocity/lag: it subdivides deltaMs into fixed PHYSICS_FPS-sized
+        // substeps internally (Phaser's own accumulator, the same mechanism
+        // the client's Scene already uses every frame), instead of doing one
+        // big discrete AABB check that a fast body could skip clean over.
+        this._simTimeMs += deltaMs;
+        this.world.update(this._simTimeMs, deltaMs);
         this._collectDeaths();
     }
 

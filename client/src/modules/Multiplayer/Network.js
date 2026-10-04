@@ -3,10 +3,11 @@ import { Callbacks } from "@colyseus/sdk";
 
 import { variable } from "../GameValues/LocalVariables.js";
 
-import { createPlayer, shatterPlayer, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
+import { createPlayer, applyPlayerPolygon, shatterPlayer, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
 import { getSession, persistXP } from "./FirebaseConfig.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
+import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 
 export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
@@ -71,7 +72,7 @@ export async function connect() {
         const callbacks = Callbacks.get(room);
 
         callbacks.onAdd("players", (playerState, sessionId) => {
-            const p = createPlayer(sessionId, playerState.x, playerState.y);
+            const p = createPlayer(sessionId, playerState.x, playerState.y, playerState);
 
             if (p.isLocal) {
                 applyLocalPlayerState(playerState);
@@ -92,6 +93,7 @@ export async function connect() {
                     remote.targetX = playerState.x;
                     remote.targetY = playerState.y;
                     setRemotePlayerName(remote, playerState.name);
+                    applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
 
                     const prevHealth = remote.health;
                     const nextHealth = playerState.health;
@@ -119,6 +121,9 @@ export async function connect() {
                     const next = playerState.health;
 
                     applyLocalPlayerState(playerState);
+                    if (remote) {
+                        applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
+                    }
                     variable.playerHealth = next;
                     updateHealthBar();
 

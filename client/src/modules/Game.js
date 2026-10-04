@@ -69,6 +69,10 @@ const config = {
         arcade: {
             gravity: { y: SETTINGS.GRAVITY },
             debug: false,
+            // See PHYSICS_FPS in Constants.js: keeps a fast-moving body (e.g.
+            // Fastfall) from covering more distance than a block's thickness
+            // within a single physics substep and tunneling through it.
+            fps: SETTINGS.PHYSICS_FPS,
         },
     },
 
