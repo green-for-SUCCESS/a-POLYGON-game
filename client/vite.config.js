@@ -8,13 +8,21 @@ import { resolve } from "path";
 // dev.html, dev-main.js, or anything under modules/Dev/.
 export default defineConfig(({ mode }) => {
     const isDevtools = mode === "devtools";
+    const base = "/a-POLYGON-game/";
 
     return {
-        base: "/a-POLYGON-game/",
+        base,
         server: {
             headers: {
                 "Cross-Origin-Opener-Policy": "same-origin-allow-popups"
-            }
+            },
+            // `--mode devtools` only changes env vars / import.meta.env.MODE —
+            // the dev SERVER (unlike `vite build`) ignores rollupOptions.input
+            // entirely and serves index.html at `/` by default regardless of
+            // mode. Without this, `npm run dev:devtools` silently opens the
+            // normal production entry (main.js), not the dev build at all —
+            // this is what made the dev console "disappear".
+            open: isDevtools ? `${base}dev.html` : undefined,
         },
         preview: {
             headers: {

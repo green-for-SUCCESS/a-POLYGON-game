@@ -196,7 +196,7 @@ async function attemptConnect() {
             variable.persistentXP = nextXP;
             variable.runXP = 0;
             updateProgressHud();
-            persistXP(nextXP).catch(() => {});
+            persistXPWithRetry(nextXP);
         });
 
         const callbacks = Callbacks.get(room);
@@ -271,7 +271,73 @@ async function attemptConnect() {
             destroyPlayer(sessionId);
         });
         
+    // A player who just died while offline (or whose connection drops the
+    // instant they do) shouldn't lose XP they already earned just because
+    // this one write failed — try again a few times, and if that's still
+    // not enough, stash it so a later page load can finish the job instead
+    // of silently discarding it.
+    flushPendingXP();
+
     return room;
+}
+
+const PENDING_XP_KEY = "pendingPersistXP";
+const PERSIST_RETRY_DELAYS_MS = [1000, 3000, 10000];
+
+async function persistXPWithRetry(xp, attempt = 0) {
+    try {
+        await persistXP(xp);
+        clearPendingXP(xp);
+    } catch (e) {
+        console.error(`❌ persistXP failed (attempt ${attempt + 1}):`, e);
+
+        if (attempt < PERSIST_RETRY_DELAYS_MS.length) {
+            setTimeout(() => persistXPWithRetry(xp, attempt + 1), PERSIST_RETRY_DELAYS_MS[attempt]);
+        } else {
+            savePendingXP(xp);
+        }
+    }
+}
+
+function savePendingXP(xp) {
+    try {
+        // Never stash a value lower than whatever's already pending —
+        // another failed save earlier in the same outage may have recorded
+        // a higher (more up to date) amount already.
+        const existing = Number(localStorage.getItem(PENDING_XP_KEY));
+        if (!Number.isFinite(existing) || xp > existing) {
+            localStorage.setItem(PENDING_XP_KEY, String(xp));
+        }
+    } catch {
+        // localStorage unavailable (private browsing, etc.) — nothing more
+        // we can do locally; the attempt was already logged above.
+    }
+}
+
+function clearPendingXP(savedXp) {
+    try {
+        const existing = Number(localStorage.getItem(PENDING_XP_KEY));
+        if (Number.isFinite(existing) && existing <= savedXp) {
+            localStorage.removeItem(PENDING_XP_KEY);
+        }
+    } catch {
+    }
+}
+
+// Runs once per successful connection: if a previous session left XP that
+// never made it to Firestore, retry it now rather than leaving it stranded
+// in localStorage forever.
+function flushPendingXP() {
+    let pending;
+    try {
+        pending = Number(localStorage.getItem(PENDING_XP_KEY));
+    } catch {
+        return;
+    }
+
+    if (Number.isFinite(pending) && pending > 0) {
+        persistXPWithRetry(pending);
+    }
 }
 
 function applyLocalPlayerState(playerState) {

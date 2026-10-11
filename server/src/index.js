@@ -8,6 +8,12 @@
  *
  * See: https://docs.colyseus.io/server/api/#constructor-options
  */
+// Must be the very first import: loads server/.env.* reliably regardless of
+// the process's working directory, before anything below reads process.env
+// (see loadEnv.js for why this is necessary and not redundant with
+// @colyseus/tools's own env loading).
+import "./loadEnv.js";
+
 import { listen } from "@colyseus/tools";
 import { matchMaker } from "colyseus";
 
