@@ -178,8 +178,8 @@ async function attemptConnect() {
         room.onMessage("devAuthResult", (data) => {
             variable.devLog.push(
                 data?.ok
-                    ? "✓ Developer authorization confirmed — K/L/R and commands are live."
-                    : "✗ Developer authorization FAILED: " + (data?.reason || "unknown reason") + " K/L/R and commands will do nothing."
+                    ? "✓ Developer authorization confirmed — commands are live."
+                    : "✗ Developer authorization FAILED: " + (data?.reason || "unknown reason") + " Commands will do nothing."
             );
         });
 

@@ -83,8 +83,21 @@ export async function isUidBanned(uid) {
     }
 
     try {
-        const snap = await admin.firestore().collection("bans").doc(uid).get();
-        return snap.exists;
+        const ref = admin.firestore().collection("bans").doc(uid);
+        const snap = await ref.get();
+        if (!snap.exists) {
+            return false;
+        }
+
+        const { expiresAt } = snap.data() || {};
+        if (expiresAt && expiresAt <= Date.now()) {
+            // Expired temporary ban — clean it up lazily so it stops
+            // blocking access and doesn't linger in Firestore forever.
+            ref.delete().catch(() => {});
+            return false;
+        }
+
+        return true;
     } catch (err) {
         console.error("[firebaseAdmin] isUidBanned failed:", err?.message || err);
         return false;
@@ -112,7 +125,36 @@ export async function getUidForUsername(username) {
     }
 }
 
-export async function banUsername(username, reason) {
+// `hours`: positive finite number for a temporary ban, or null/undefined for
+// a permanent ban that stays until an explicit /unban.
+export async function banUsername(username, hours) {
+    const ready = await ensureInit();
+    if (!ready) {
+        return { ok: false, error: "Firebase Admin is not configured on the server (FIREBASE_SERVICE_ACCOUNT_JSON)." };
+    }
+
+    const uid = await getUidForUsername(username);
+    if (!uid) {
+        return { ok: false, error: `No account found for username "${username}".` };
+    }
+
+    const expiresAt = (hours != null) ? Date.now() + hours * 60 * 60 * 1000 : null;
+
+    try {
+        await admin.firestore().collection("bans").doc(uid).set({
+            uid,
+            username,
+            bannedAt: Date.now(),
+            expiresAt,
+        });
+
+        return { ok: true, uid, expiresAt };
+    } catch (err) {
+        return { ok: false, error: err?.message || "Failed to write ban record." };
+    }
+}
+
+export async function unbanUsername(username) {
     const ready = await ensureInit();
     if (!ready) {
         return { ok: false, error: "Firebase Admin is not configured on the server (FIREBASE_SERVICE_ACCOUNT_JSON)." };
@@ -124,15 +166,54 @@ export async function banUsername(username, reason) {
     }
 
     try {
-        await admin.firestore().collection("bans").doc(uid).set({
-            uid,
-            username,
-            reason: reason || null,
-            bannedAt: Date.now(),
-        });
+        const ref = admin.firestore().collection("bans").doc(uid);
+        const snap = await ref.get();
+        if (!snap.exists) {
+            return { ok: true, uid, wasAlreadyUnbanned: true };
+        }
 
-        return { ok: true, uid };
+        await ref.delete();
+        return { ok: true, uid, wasAlreadyUnbanned: false };
     } catch (err) {
-        return { ok: false, error: err?.message || "Failed to write ban record." };
+        return { ok: false, error: err?.message || "Failed to remove ban record." };
+    }
+}
+
+// XP-freeze is stored per-uid so it survives a reconnect or server restart,
+// the same way bans do — reuses the exact same Admin/Firestore plumbing
+// rather than inventing a second persistence path.
+export async function getXPFreeze(uid) {
+    if (!uid) {
+        return false;
+    }
+
+    const ready = await ensureInit();
+    if (!ready) {
+        return false;
+    }
+
+    try {
+        const snap = await admin.firestore().collection("devFlags").doc(uid).get();
+        return Boolean(snap.exists && snap.data()?.xpFrozen);
+    } catch (err) {
+        console.error("[firebaseAdmin] getXPFreeze failed:", err?.message || err);
+        return false;
+    }
+}
+
+export async function setXPFreeze(uid, frozen) {
+    if (!uid) {
+        return;
+    }
+
+    const ready = await ensureInit();
+    if (!ready) {
+        return;
+    }
+
+    try {
+        await admin.firestore().collection("devFlags").doc(uid).set({ xpFrozen: Boolean(frozen) }, { merge: true });
+    } catch (err) {
+        console.error("[firebaseAdmin] setXPFreeze failed:", err?.message || err);
     }
 }

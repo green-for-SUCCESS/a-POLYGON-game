@@ -1,21 +1,20 @@
-// Developer-only playtesting tools: level shortcuts + a tiny admin console.
-// Only ever imported/installed from dev-main.js (the separate developer
-// entry point) — never referenced by main.js, Game.js, Create.js or Home.js,
-// so this module (and the devToken it sends) never ships as part of a
-// normal production build's import graph at all.
+// Developer-only admin console. Only ever imported/installed from
+// dev-main.js (the separate developer entry point) — never referenced by
+// main.js, Game.js, Create.js or Home.js, so this module (and the devToken
+// it sends) never ships as part of a normal production build's import
+// graph at all.
 //
 // Every command here only ever *asks* the server to do something
-// (room.send(...)); the server is the one that actually verifies developer
-// authorization (via the devToken checked at join time) and performs the
-// level change / kick / ban. This file never mutates gameplay state itself.
+// (room.send(...)); the server independently re-validates everything
+// (developer authorization, target resolution, amounts, ban state) and is
+// the only thing that actually mutates gameplay/account state. This file
+// never does either itself — it just parses input for basic shape/usage
+// feedback and displays the server's reply.
 import { variable } from "../GameValues/LocalVariables.js";
-
-const REPEAT_INTERVAL_MS = 120; // controlled interval, independent of render framerate
 
 let installed = false;
 let logEl = null;
 let inputEl = null;
-const holdTimers = { K: null, L: null };
 
 export function installDevTools() {
     if (installed) {
@@ -24,10 +23,11 @@ export function installDevTools() {
     installed = true;
 
     _buildConsole();
-    _installKeyboardShortcuts();
     _watchRoomForDevMessages();
-    _log("Dev tools active — K: level down (hold), L: level up (hold), R: reset level.");
-    _log("Commands: /kick <username>, /ban <username>");
+    _log("Dev console active. Commands:");
+    _log("/ban <player> [hours]   /unban <player>");
+    _log("/givexp <amount> [player]   /setxp <amount> [player]");
+    _log("/togglefreezexp <player>");
 }
 
 function _buildConsole() {
@@ -45,11 +45,11 @@ function _buildConsole() {
     title.style.cssText = "font-weight:bold;margin-bottom:4px;opacity:0.8;letter-spacing:1px;";
 
     logEl = document.createElement("div");
-    logEl.style.cssText = "max-height:120px;overflow-y:auto;margin-bottom:4px;white-space:pre-wrap;line-height:1.4;";
+    logEl.style.cssText = "max-height:140px;overflow-y:auto;margin-bottom:4px;white-space:pre-wrap;line-height:1.4;";
 
     inputEl = document.createElement("input");
     inputEl.type = "text";
-    inputEl.placeholder = "/kick username";
+    inputEl.placeholder = "/givexp 500";
     inputEl.autocomplete = "off";
     inputEl.spellcheck = false;
     inputEl.style.cssText = [
@@ -59,8 +59,8 @@ function _buildConsole() {
     ].join(";");
 
     inputEl.addEventListener("keydown", (event) => {
-        // Stop the game's own key handlers (and our K/L/R shortcuts) from
-        // firing while the developer is typing a command.
+        // Stop ordinary game controls (WASD, slash, etc.) from firing while
+        // the developer is typing a command into this field.
         event.stopPropagation();
 
         if (event.key === "Enter") {
@@ -89,6 +89,9 @@ function _log(message) {
     logEl.scrollTop = logEl.scrollHeight;
 }
 
+// Client-side parsing here is for usage feedback only (e.g. "you forgot the
+// amount") — it is never trusted as validation. The server re-parses and
+// re-validates every argument independently before doing anything.
 function _runCommand(text) {
     _log("> " + text);
 
@@ -98,14 +101,44 @@ function _runCommand(text) {
     }
 
     const [cmd, ...rest] = text.split(/\s+/);
-    const username = rest.join(" ");
 
-    if (cmd === "/kick" && username) {
-        variable.room.send("devKick", { username });
-    } else if (cmd === "/ban" && username) {
-        variable.room.send("devBan", { username });
+    if (cmd === "/ban") {
+        const [username, hours] = rest;
+        if (!username) {
+            _log("Usage: /ban <player> [time_in_hours]");
+            return;
+        }
+        variable.room.send("devBan", { username, hours: hours ?? null });
+    } else if (cmd === "/unban") {
+        const [username] = rest;
+        if (!username) {
+            _log("Usage: /unban <player>");
+            return;
+        }
+        variable.room.send("devUnban", { username });
+    } else if (cmd === "/givexp") {
+        const [amount, username] = rest;
+        if (amount === undefined) {
+            _log("Usage: /givexp <amount> [player]");
+            return;
+        }
+        variable.room.send("devGiveXP", { amount: Number(amount), username: username ?? null });
+    } else if (cmd === "/setxp") {
+        const [amount, username] = rest;
+        if (amount === undefined) {
+            _log("Usage: /setxp <amount> [player]");
+            return;
+        }
+        variable.room.send("devSetXP", { amount: Number(amount), username: username ?? null });
+    } else if (cmd === "/togglefreezexp") {
+        const [username] = rest;
+        if (!username) {
+            _log("Usage: /togglefreezexp <player>");
+            return;
+        }
+        variable.room.send("devToggleFreezeXP", { username });
     } else {
-        _log('Unknown command. Try "/kick <username>" or "/ban <username>".');
+        _log('Unknown command. Try "/ban", "/unban", "/givexp", "/setxp", or "/togglefreezexp".');
     }
 }
 
@@ -121,62 +154,4 @@ function _watchRoomForDevMessages() {
             _log(variable.devLog.shift());
         }
     }, 150);
-}
-
-function _isTypingInTextField() {
-    const el = document.activeElement;
-    return Boolean(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"));
-}
-
-function _installKeyboardShortcuts() {
-    function sendLevelDelta(delta) {
-        if (variable.room) {
-            variable.room.send("devAdjustLevel", { delta });
-        }
-    }
-
-    function startRepeat(key, action) {
-        if (holdTimers[key]) {
-            return;
-        }
-        action();
-        holdTimers[key] = setInterval(action, REPEAT_INTERVAL_MS);
-    }
-
-    function stopRepeat(key) {
-        if (holdTimers[key]) {
-            clearInterval(holdTimers[key]);
-            holdTimers[key] = null;
-        }
-    }
-
-    window.addEventListener("keydown", (event) => {
-        if (_isTypingInTextField()) {
-            return;
-        }
-
-        const key = event.key.toLowerCase();
-
-        if (key === "k") {
-            startRepeat("K", () => sendLevelDelta(-1));
-        } else if (key === "l") {
-            startRepeat("L", () => sendLevelDelta(1));
-        } else if (key === "r") {
-            if (variable.room) {
-                variable.room.send("devResetLevel");
-                _log("Reset level requested.");
-            }
-        }
-    });
-
-    window.addEventListener("keyup", (event) => {
-        const key = event.key.toLowerCase();
-        if (key === "k") stopRepeat("K");
-        if (key === "l") stopRepeat("L");
-    });
-
-    window.addEventListener("blur", () => {
-        stopRepeat("K");
-        stopRepeat("L");
-    });
 }

@@ -3,7 +3,8 @@ import { BattleRoomState } from "./schema/BattleRoomState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
-import { verifyIdToken, isUidBanned, banUsername } from "../firebaseAdmin.js";
+import { SETTINGS } from "../../../shared-data/Constants.js";
+import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze } from "../firebaseAdmin.js";
 
 export class BattleRoom extends Room {
 
@@ -97,41 +98,44 @@ export class BattleRoom extends Room {
     // devToken at all, so it never gets this flag in the first place).
     // ---------------------------------------------------------------
     _registerDevMessages() {
-        this.onMessage("devAdjustLevel", (client, data) => {
-            if (!client.userData?.isDeveloper) {
-                return;
-            }
-
-            const delta = Math.trunc(Number(data?.delta) || 0);
-            if (delta === 0) {
-                return;
-            }
-
-            this.game.devAdjustLevel(client.sessionId, delta);
-        });
-
-        this.onMessage("devResetLevel", (client) => {
-            if (!client.userData?.isDeveloper) {
-                return;
-            }
-
-            this.game.devResetLevel(client.sessionId);
-        });
-
-        this.onMessage("devKick", (client, data) => {
-            if (!client.userData?.isDeveloper) {
-                return;
-            }
-
-            this._devReply(client, this._handleDevKick(String(data?.username || "")));
-        });
-
         this.onMessage("devBan", async (client, data) => {
             if (!client.userData?.isDeveloper) {
                 return;
             }
 
-            this._devReply(client, await this._handleDevBan(String(data?.username || "")));
+            this._devReply(client, await this._handleDevBan(data));
+        });
+
+        this.onMessage("devUnban", async (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, await this._handleDevUnban(data));
+        });
+
+        this.onMessage("devGiveXP", (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, this._handleDevXPCommand(client, data, "give"));
+        });
+
+        this.onMessage("devSetXP", (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, this._handleDevXPCommand(client, data, "set"));
+        });
+
+        this.onMessage("devToggleFreezeXP", (client, data) => {
+            if (!client.userData?.isDeveloper) {
+                return;
+            }
+
+            this._devReply(client, this._handleDevToggleFreezeXP(data));
         });
     }
 
@@ -140,7 +144,7 @@ export class BattleRoom extends Room {
     }
 
     _findSessionIdByUsername(username) {
-        const needle = username.trim().toLowerCase();
+        const needle = String(username || "").trim().toLowerCase();
         if (!needle) {
             return null;
         }
@@ -154,34 +158,142 @@ export class BattleRoom extends Room {
         return null;
     }
 
-    _handleDevKick(username) {
+    // Shared by every command that takes an optional target username:
+    // resolves to that connected player, or to the issuing developer
+    // themselves when no username is given. Only ever resolves to an
+    // actual connected session's PlayerState, never an arbitrary
+    // client-supplied id.
+    _resolveTarget(client, username) {
+        if (!username) {
+            return { sessionId: client.sessionId, player: this.state.players.get(client.sessionId) };
+        }
+
+        const sessionId = this._findSessionIdByUsername(username);
+        if (!sessionId) {
+            return { error: `Player not found: "${username}"` };
+        }
+
+        return { sessionId, player: this.state.players.get(sessionId) };
+    }
+
+    _forceDisconnect(sessionId, reason) {
+        const target = this.clients.find((c) => c.sessionId === sessionId);
+        if (!target) {
+            return;
+        }
+
+        target.send("devKicked", { reason });
+        target.leave(4000, reason);
+    }
+
+    async _handleDevBan(data) {
+        const username = String(data?.username || "").trim();
+        if (!username) {
+            return "Usage: /ban <player> [time_in_hours]";
+        }
+
+        let hours;
+        if (data?.hours != null && data.hours !== "") {
+            hours = Number(data.hours);
+            if (!Number.isFinite(hours) || hours <= 0) {
+                return `Invalid duration: "${data.hours}". Use a positive number of hours, or omit it for a permanent ban.`;
+            }
+        } else {
+            hours = null;
+        }
+
+        // The ban record alone only blocks *future* verified-identity joins;
+        // also disconnect them immediately if they're currently connected.
+        const sessionId = this._findSessionIdByUsername(username);
+        if (sessionId) {
+            this._forceDisconnect(sessionId, "Banned by a developer.");
+        }
+
+        const result = await banUsername(username, hours);
+        if (!result.ok) {
+            return `Ban failed: ${result.error}`;
+        }
+
+        return hours
+            ? `Banned "${username}" for ${hours} hour(s).`
+            : `Banned "${username}" permanently.`;
+    }
+
+    async _handleDevUnban(data) {
+        const username = String(data?.username || "").trim();
+        if (!username) {
+            return "Usage: /unban <player>";
+        }
+
+        const result = await unbanUsername(username);
+        if (!result.ok) {
+            return `Unban failed: ${result.error}`;
+        }
+
+        return result.wasAlreadyUnbanned
+            ? `"${username}" was not banned.`
+            : `Unbanned "${username}".`;
+    }
+
+    _handleDevXPCommand(client, data, mode) {
+        const amount = Number(data?.amount);
+        if (!Number.isFinite(amount)) {
+            return `Usage: /${mode === "give" ? "givexp <amount> [player]" : "setxp <amount> [player]"}`;
+        }
+
+        if (Math.abs(amount) > SETTINGS.DEV_XP_MAX) {
+            return `Amount out of range (max ${SETTINGS.DEV_XP_MAX}).`;
+        }
+
+        if (mode === "set" && amount < 0) {
+            return "XP cannot be set to a negative value.";
+        }
+
+        const username = String(data?.username || "").trim();
+        const target = this._resolveTarget(client, username);
+        if (target.error) {
+            return target.error;
+        }
+
+        const result = mode === "give"
+            ? this.game.devGiveXP(target.sessionId, amount)
+            : this.game.devSetXP(target.sessionId, amount);
+
+        if (!result.ok) {
+            return result.error;
+        }
+
+        const who = username || target.player?.name || "you";
+        return mode === "give"
+            ? `Gave ${amount} XP to ${who} (now ${result.xp} XP).`
+            : `Set ${who}'s XP to ${result.xp}.`;
+    }
+
+    _handleDevToggleFreezeXP(data) {
+        const username = String(data?.username || "").trim();
+        if (!username) {
+            return "Usage: /togglefreezexp <player>";
+        }
+
         const sessionId = this._findSessionIdByUsername(username);
         if (!sessionId) {
             return `Player not found: "${username}"`;
         }
 
+        const nextState = !this.game.isXPFrozen(sessionId);
+        this.game.setXPFrozen(sessionId, nextState);
+
+        // Durable only for verified accounts (same identity caveat as bans —
+        // an anonymous/guest session has no uid to key a Firestore doc on,
+        // so for them this is in-memory for the current connection only).
         const target = this.clients.find((c) => c.sessionId === sessionId);
-        if (!target) {
-            return `Player not found: "${username}"`;
+        if (target?.auth?.uid) {
+            setXPFreeze(target.auth.uid, nextState).catch(() => {});
         }
 
-        target.send("devKicked", { reason: "Kicked by a developer." });
-        target.leave(4000, "Kicked by a developer.");
-
-        return `Kicked "${username}".`;
-    }
-
-    async _handleDevBan(username) {
-        // Also kick them immediately if they're currently connected — the
-        // ban record alone only blocks *future* verified-identity joins.
-        this._handleDevKick(username);
-
-        const result = await banUsername(username.trim());
-        if (!result.ok) {
-            return `Ban failed: ${result.error}`;
-        }
-
-        return `Banned "${username}" (uid ${result.uid}).`;
+        return nextState
+            ? `XP freezing enabled for ${username}`
+            : `XP freezing disabled for ${username}`;
     }
 
     _dispatchFastfallDenials() {
@@ -263,11 +375,15 @@ export class BattleRoom extends Room {
         }
     }
 
-    onJoin(client, options) {
+    async onJoin(client, options) {
         const player = new PlayerState();
         player.name = sanitizePlayerName(options?.username || options?.name);
         player.xp = Math.max(0, Math.floor(Number(options?.xp) || 0));
         this.game.applyRunStart(player);
+        // Restore a durable /togglefreezexp setting for returning verified
+        // accounts; anonymous/guest sessions simply start unfrozen (there's
+        // no uid to have persisted it against in the first place).
+        player.xpFrozen = client.auth?.uid ? await getXPFreeze(client.auth.uid) : false;
 
         this.state.players.set(client.sessionId, player);
 
@@ -286,7 +402,7 @@ export class BattleRoom extends Room {
         // would be a bug in the build), so this only ever fires for clients
         // that are actually trying to authenticate as a developer. Without
         // this, a devToken/DEV_SECRET mismatch fails completely silently —
-        // every K/L/R press and every admin command just does nothing, with
+        // every admin command just silently does nothing, with
         // no way to tell "this is broken" from "this never happened".
         if (presented != null) {
             this._pendingDevAuthResults.push({

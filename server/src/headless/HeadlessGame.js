@@ -3,7 +3,7 @@ import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
-import { getEnemyStats, getPlayerStatsFromXP, getLevelFromXP, getTotalXPForLevel, rollEnemyRarity } from "../../../shared-data/Progression.js";
+import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
@@ -73,7 +73,6 @@ export class HeadlessGame {
         player.fastfallDenied = false;
         player.slashCooldownRemaining = 0;
         player.runEnded = false;
-        player._devOriginalXP = null;
     }
 
     applyPlayerInput(sessionId, data) {
@@ -203,21 +202,16 @@ export class HeadlessGame {
     }
 
     // ---------------------------------------------------------------
-    // Developer-only playtesting controls (BattleRoom only calls these
-    // after verifying the connection authenticated as a developer).
-    // These mutate the real authoritative state (xp -> stats -> polygon,
-    // all through the normal paths), but never touch Firestore directly —
-    // the dev's REAL persisted XP is remembered the first time any dev
-    // command runs this session, and that original value (not whatever
-    // the dev set it to) is what eventually gets persisted in _endRun,
-    // so playtesting can't accidentally overwrite real progression.
+    // Developer-only commands (BattleRoom only calls these after verifying
+    // the connection authenticated as a developer). Unlike the old K/L/R
+    // session-only shortcuts they replaced, /givexp and /setxp are meant to actually
+    // persist — they apply through the exact same authoritative
+    // recalculation + persistence path a normal death does (set xp ->
+    // recompute level/stats -> queue one pendingPersists entry), so there is
+    // no separate dev-only XP/database mechanism to keep in sync.
     // ---------------------------------------------------------------
-    _setDevXP(player, xp) {
-        if (player._devOriginalXP == null) {
-            player._devOriginalXP = player.xp || 0;
-        }
-
-        player.xp = Math.max(0, Math.floor(xp));
+    _applyAuthoritativeXP(sessionId, player, xp) {
+        player.xp = Math.max(0, Math.min(SETTINGS.DEV_XP_MAX, Math.floor(xp)));
 
         const stats = getPlayerStatsFromXP(player.xp);
         player._stats = stats;
@@ -225,26 +219,48 @@ export class HeadlessGame {
         if (player.health > 0) {
             player.health = stats.maxHealth;
         }
+
+        // One controlled persistence operation per command, through the
+        // same queue/flush the rest of the game already uses — not a
+        // second ad hoc Firestore write path.
+        this.pendingPersists.push({ sessionId, xp: player.xp });
     }
 
-    devAdjustLevel(sessionId, delta) {
+    // Deliberately bypasses xpFrozen: the freeze blocks *ordinary* gameplay
+    // XP income (see _killEnemy), not an explicit developer command.
+    devGiveXP(sessionId, amount) {
         const player = this.players?.get(sessionId);
-        if (!player || !Number.isFinite(delta)) {
-            return;
+        if (!player || !Number.isFinite(amount)) {
+            return { ok: false, error: "Invalid amount." };
         }
 
-        const currentLevel = getLevelFromXP(player.xp || 0);
-        const targetLevel = Math.max(1, currentLevel + Math.trunc(delta));
-        this._setDevXP(player, getTotalXPForLevel(targetLevel));
+        this._applyAuthoritativeXP(sessionId, player, (player.xp || 0) + amount);
+        return { ok: true, xp: player.xp };
     }
 
-    devResetLevel(sessionId) {
+    devSetXP(sessionId, amount) {
+        const player = this.players?.get(sessionId);
+        if (!player || !Number.isFinite(amount) || amount < 0) {
+            return { ok: false, error: "Invalid amount." };
+        }
+
+        this._applyAuthoritativeXP(sessionId, player, amount);
+        return { ok: true, xp: player.xp };
+    }
+
+    // Returns the new state, or null if the target isn't currently connected.
+    setXPFrozen(sessionId, frozen) {
         const player = this.players?.get(sessionId);
         if (!player) {
-            return;
+            return null;
         }
 
-        this._setDevXP(player, 0);
+        player.xpFrozen = Boolean(frozen);
+        return player.xpFrozen;
+    }
+
+    isXPFrozen(sessionId) {
+        return Boolean(this.players?.get(sessionId)?.xpFrozen);
     }
 
     update(deltaMs) {
@@ -413,7 +429,10 @@ export class HeadlessGame {
             return;
         }
 
-        if (killer && killer.health > 0) {
+        // /togglefreezexp blocks *ordinary* XP income specifically — every
+        // gameplay path that grants XP funnels through this one line, so
+        // gating it here covers all of them, present and future.
+        if (killer && killer.health > 0 && !killer.xpFrozen) {
             killer.runXP = (killer.runXP || 0) + (enemy.body.xp || 0);
         }
 
@@ -440,14 +459,8 @@ export class HeadlessGame {
 
         player.runEnded = true;
         player.health = 0;
-
-        // If a dev command ever touched this player's xp this session, persist
-        // their real pre-testing xp (+ whatever they actually earned this run)
-        // instead of whatever level the dev tools happened to leave them at.
-        const baselineXP = player._devOriginalXP != null ? player._devOriginalXP : (player.xp || 0);
-        player.xp = baselineXP + (player.runXP || 0);
+        player.xp = (player.xp || 0) + (player.runXP || 0);
         player.runXP = 0;
-        player._devOriginalXP = null;
 
         this.pendingPersists.push({
             sessionId,

@@ -49,7 +49,7 @@ if (mode !== "production") {
 
     if (!process.env.DEV_SECRET) {
         console.log(
-            "[env] DEV_SECRET is not set. Developer-build commands (K/L/R, /kick, /ban) " +
+            "[env] DEV_SECRET is not set. Developer-build commands (/ban, /unban, /givexp, /setxp, /togglefreezexp) " +
             "will be safely rejected by the server until it is. Set DEV_SECRET in " +
             "server/.env.development to the same value as client/.env.devtools's " +
             "VITE_DEV_SECRET, then restart this server process (env vars are only " +

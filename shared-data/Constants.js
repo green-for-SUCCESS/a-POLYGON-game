@@ -40,17 +40,17 @@ export const SETTINGS = {
     // ---------------- ZONES ----------------
     SPAWN_ZONE_WIDTH: 500,
 
-    ZONE_PEACEFUL_CAP: 50,
-    ZONE_PEACEFUL_SPAWN_CHANCE: 0.25,
+    ZONE_PEACEFUL_CAP: 25,
+    ZONE_PEACEFUL_SPAWN_CHANCE: 0.1,
 
-    ZONE_RESTLESS_CAP: 100,
-    ZONE_RESTLESS_SPAWN_CHANCE: 0.50,
+    ZONE_RESTLESS_CAP: 50,
+    ZONE_RESTLESS_SPAWN_CHANCE: 0.25,
 
-    ZONE_CHAOTIC_CAP: 200,
-    ZONE_CHAOTIC_SPAWN_CHANCE: 0.75,
+    ZONE_CHAOTIC_CAP: 100,
+    ZONE_CHAOTIC_SPAWN_CHANCE: 0.5,
 
-    ZONE_ANARCHIC_CAP: 400,
-    ZONE_ANARCHIC_SPAWN_CHANCE: 1.00,
+    ZONE_ANARCHIC_CAP: 200,
+    ZONE_ANARCHIC_SPAWN_CHANCE: 0.75,
 
     // ---------------- ENEMY RARITY / SHAPE ----------------
     ENEMY_RARITY_MAX: 4,
@@ -66,7 +66,7 @@ export const SETTINGS = {
     ENEMY_XP_GROWTH: 4,
 
     // ---------------- SPAWNING ----------------
-    MAX_ENEMIES: 300,
+    MAX_ENEMIES: 1000,
 
     // ---------------- ENEMY AI ----------------
     // Enemy movement uses the player's force/mass/drag model (see Movement.js).
@@ -104,6 +104,11 @@ export const SETTINGS = {
     // ---------------- PLAYER PROGRESSION ----------------
     LEVEL_XP_BASE: 100,
     LEVEL_XP_GROWTH: 1.25,
+
+    // Sanity bound for developer /givexp and /setxp — keeps XP numerically
+    // sane (no Infinity/overflow abuse) without being so low it gets in the
+    // way of testing high-level stats/polygon geometry.
+    DEV_XP_MAX: 10000000,
 
     PLAYER_BASE_MAX_HEALTH: 20,
     PLAYER_HEALTH_GROWTH: 1.05,
