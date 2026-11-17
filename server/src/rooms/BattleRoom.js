@@ -411,7 +411,7 @@ export class BattleRoom extends Room {
                 reason: !devSecret
                     ? "Server has no DEV_SECRET configured."
                     : !client.userData.isDeveloper
-                        ? "devToken did not match the server's DEV_SECRET."
+                        ? " did not match the server's DEV_SECRET."
                         : null,
             });
         }
