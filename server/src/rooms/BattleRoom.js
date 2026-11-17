@@ -321,6 +321,7 @@ export class BattleRoom extends Room {
             if (!enemyState || !snap) {
                 continue;
             }
+            enemyState.id = snap.id;
             enemyState.x = snap.x;
             enemyState.y = snap.y;
             enemyState.rarity = snap.rarity;

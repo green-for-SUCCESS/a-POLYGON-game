@@ -1,10 +1,18 @@
 import { SETTINGS, ENEMY_STATE, ENEMY_RARITY_COLORS } from "../../../../shared-data/Constants.js";
 import { getEnemyRadius } from "../../../../shared-data/Geometry.js";
 import { variable } from "../GameValues/LocalVariables.js";
-import { shatterAt } from "./Effects.js";
 
-const MATCH_DISTANCE = 140;
 const HIT_FLASH_DURATION = 100; // ms
+const DEATH_DURATION = 200; // ms
+const DEATH_SCALE = 1.6;
+
+// Keyed by the server's enemy id. The server only ever removes an enemy
+// from its state when it dies (HeadlessGame._killEnemy), so an id that was
+// here last frame and is gone now is a death — not a guess from position
+// jumps, which is what the old nearest-match lookup relied on.
+const visualsById = new Map();
+let frameStamp = 0;
+let trackedScene = null;
 
 export function applyEnemySnapshot(snapshot) {
     const scene = variable.sceneRef;
@@ -12,29 +20,24 @@ export function applyEnemySnapshot(snapshot) {
         return;
     }
 
-    const visuals = variable.enemyVisuals || [];
-    const used = new Set();
-    const next = [];
+    // Returning to the Game scene builds a fresh scene; the previous scene's
+    // sprites were destroyed with it, so drop them without animating.
+    if (scene !== trackedScene) {
+        visualsById.clear();
+        trackedScene = scene;
+    }
+
+    frameStamp++;
+    const live = variable.enemyVisuals;
+    live.length = 0;
 
     for (const snap of snapshot) {
-        let bestIndex = -1;
-        let bestDist = MATCH_DISTANCE;
+        let visual = visualsById.get(snap.id);
 
-        for (let i = 0; i < visuals.length; i++) {
-            if (used.has(i)) continue;
-            const visual = visuals[i];
-            if (visual.rarity !== snap.rarity) continue;
-
-            const dist = Math.hypot(visual.x - snap.x, visual.y - snap.y);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestIndex = i;
-            }
-        }
-
-        if (bestIndex >= 0) {
-            used.add(bestIndex);
-            const visual = visuals[bestIndex];
+        if (!visual) {
+            visual = createEnemyVisual(scene, snap);
+            visualsById.set(snap.id, visual);
+        } else {
             visual.x = snap.x;
             visual.y = snap.y;
             visual.state = snap.state;
@@ -58,28 +61,38 @@ export function applyEnemySnapshot(snapshot) {
                 visual.flashUntil = 0;
                 applyStateTint(visual);
             }
+        }
 
-            next.push(visual);
-        } else {
-            next.push(createEnemyVisual(scene, snap));
+        visual.seenFrame = frameStamp;
+        live.push(visual);
+    }
+
+    if (visualsById.size !== live.length) {
+        for (const [id, visual] of visualsById) {
+            if (visual.seenFrame !== frameStamp) {
+                visualsById.delete(id);
+                playEnemyDeath(scene, visual);
+            }
         }
     }
+}
 
-    for (let i = 0; i < visuals.length; i++) {
-        if (used.has(i)) continue;
-        const visual = visuals[i];
-        shatterAt(
-            visual.x,
-            visual.y,
-            visual.velocityX ?? 0,
-            visual.velocityY ?? 0,
-            `enemy-${visual.rarity}`,
-            ENEMY_RARITY_COLORS[visual.rarity]
-        );
-        visual.sprite.destroy();
-    }
+// Grow-and-fade on the enemy's own sprite: no new objects, physics bodies
+// or timers, just one tween that destroys the sprite when it finishes. The
+// visual has already left visualsById, so nothing else touches it and a
+// later snapshot can't restart or interrupt it.
+function playEnemyDeath(scene, visual) {
+    const sprite = visual.sprite;
 
-    variable.enemyVisuals = next;
+    scene.tweens.add({
+        targets: sprite,
+        scaleX: sprite.scaleX * DEATH_SCALE,
+        scaleY: sprite.scaleY * DEATH_SCALE,
+        alpha: 0,
+        duration: DEATH_DURATION,
+        ease: "Quad.easeOut",
+        onComplete: () => sprite.destroy(),
+    });
 }
 
 function createEnemyVisual(scene, snap) {
@@ -155,8 +168,9 @@ export function drawEnemyDebug(graphics) {
 }
 
 export function clearEnemyVisuals() {
-    for (const visual of variable.enemyVisuals) {
+    for (const visual of visualsById.values()) {
         visual.sprite.destroy();
     }
-    variable.enemyVisuals = [];
+    visualsById.clear();
+    variable.enemyVisuals.length = 0;
 }

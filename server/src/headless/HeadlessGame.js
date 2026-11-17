@@ -489,8 +489,9 @@ export class HeadlessGame {
     getEnemySnapshot() {
         const snapshot = [];
 
-        for (const [, { body }] of this.enemies) {
+        for (const [id, { body }] of this.enemies) {
             snapshot.push({
+                id: Number(id),
                 x: enemyCenterX(body),
                 y: enemyCenterY(body),
                 rarity: body.rarity ?? 0,

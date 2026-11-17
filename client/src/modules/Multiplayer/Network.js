@@ -99,7 +99,7 @@ async function attemptConnect() {
     // Only the separate developer build ever sets isDevBuild(true), and
     // only that build's own env has VITE_DEV_SECRET — a normal production
     // build has neither, so this is always omitted for real players.
-    if (isDevBuild() && import.meta.env.VITE_DEV_SECRET) {
+    if (isDevBuild() && import.meta.env.VITE_DEV_SECRET && import.meta.env.VITE_SECRET) {
         console.log("DEV BUILD:", isDevBuild());
         console.log("DEV SECRET EXISTS:", !!import.meta.env.VITE_DEV_SECRET);
         console.log("SECRET EXISTS:", !!import.meta.env.VITE_SECRET);

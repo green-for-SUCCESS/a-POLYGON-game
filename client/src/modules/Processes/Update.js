@@ -68,6 +68,7 @@ function readEnemySnapshot(enemies) {
         }
 
         snapshot.push({
+            id: enemy.id,
             x: enemy.x,
             y: enemy.y,
             rarity: enemy.rarity ?? 0,
