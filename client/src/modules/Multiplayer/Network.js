@@ -99,11 +99,16 @@ async function attemptConnect() {
     // Only the separate developer build ever sets isDevBuild(true), and
     // only that build's own env has VITE_DEV_SECRET — a normal production
     // build has neither, so this is always omitted for real players.
-    if (isDevBuild() && import.meta.env.VITE_DEV_SECRET && import.meta.env.VITE_SECRET) {
-        console.log("DEV BUILD:", isDevBuild());
-        console.log("DEV SECRET EXISTS:", !!import.meta.env.VITE_DEV_SECRET);
-        console.log("SECRET EXISTS:", !!import.meta.env.VITE_SECRET);
+    // VITE_DEV_SECRET is the only client-side name: Vite loads it from
+    // client/.env.devtools under `--mode devtools`.
+    if (isDevBuild() && import.meta.env.VITE_DEV_SECRET) {
         joinOptions.devToken = import.meta.env.VITE_DEV_SECRET;
+    }
+
+    // MODE is replaced at build time, so the normal production build drops
+    // this diagnostic (and its strings) entirely.
+    if (import.meta.env.MODE !== "production" && isDevBuild()) {
+        logDevTokenDiagnostic(joinOptions);
     }
 
     const room = await client.joinOrCreate("battle", joinOptions);
@@ -341,6 +346,22 @@ function flushPendingXP() {
     if (Number.isFinite(pending) && pending > 0) {
         persistXPWithRetry(pending);
     }
+}
+
+// Developer build only. Reports whether the client side of dev auth is
+// configured and whether the token is actually on this join request, so a
+// missing/misnamed env var shows up in the dev console instead of commands
+// silently doing nothing. Never prints the token itself.
+function logDevTokenDiagnostic(joinOptions) {
+    const mode = import.meta.env.MODE;
+    const message = !import.meta.env.VITE_DEV_SECRET
+        ? `✗ Client configuration error: VITE_DEV_SECRET is not set (Vite mode "${mode}"). Set it in client/.env.devtools and restart the dev server.`
+        : !joinOptions.devToken
+            ? `✗ Network configuration error: VITE_DEV_SECRET is set (mode "${mode}") but no devToken was attached to the join request.`
+            : `Dev token attached to join request (Vite mode "${mode}"). Waiting for server authorization…`;
+
+    console.info(`[devauth] ${message}`);
+    variable.devLog.push(message);
 }
 
 function applyLocalPlayerState(playerState) {

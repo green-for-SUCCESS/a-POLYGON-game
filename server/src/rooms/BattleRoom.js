@@ -406,14 +406,22 @@ export class BattleRoom extends Room {
         // every admin command just silently does nothing, with
         // no way to tell "this is broken" from "this never happened".
         if (presented != null) {
+            const reason = !devSecret
+                ? "Server configuration error: DEV_SECRET is not set on the server."
+                : !client.userData.isDeveloper
+                    ? "Developer token mismatch: devToken did not match the server's DEV_SECRET."
+                    : null;
+
+            // Presence/outcome only — never the secret or the token.
+            console.log(
+                `[devauth] ${client.sessionId}: token presented=yes, server DEV_SECRET configured=${devSecret ? "yes" : "no"}, ` +
+                `result=${client.userData.isDeveloper ? "authorized" : (devSecret ? "mismatch" : "no-server-secret")}`
+            );
+
             this._pendingDevAuthResults.push({
                 sessionId: client.sessionId,
                 ok: client.userData.isDeveloper,
-                reason: !devSecret
-                    ? "Server has no DEV_SECRET configured."
-                    : !client.userData.isDeveloper
-                        ? " did not match the server's DEV_SECRET."
-                        : null,
+                reason,
             });
         }
 
