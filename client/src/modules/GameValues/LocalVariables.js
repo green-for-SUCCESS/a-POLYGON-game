@@ -51,4 +51,7 @@ export const variable = {
     // in that dev-only module so Network.js can register the listener
     // immediately on connect without importing dev-only UI code.
     devLog: [],
+    // Dev console only: null = waiting for the server's devAuthResult,
+    // true/false = its answer. UI gating only; the server enforces it.
+    devAuthorized: null,
 }

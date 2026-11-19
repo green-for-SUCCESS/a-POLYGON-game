@@ -12,7 +12,12 @@ import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
 import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
 
-export const client = new Colyseus.Client("https://a-polygon-game.onrender.com");
+// Every build — including the dev-tools build served locally by Vite —
+// talks to the deployed Render server. Dev auth is validated there against
+// the DEV_SECRET configured in Render's environment settings.
+const SERVER_URL = "https://a-polygon-game.onrender.com";
+
+export const client = new Colyseus.Client(SERVER_URL);
 
 // Serializes connection attempts: a stray second call to connect() (e.g. a
 // manual retry click landing while an auto-retry is still in flight) must
@@ -20,6 +25,7 @@ export const client = new Colyseus.Client("https://a-polygon-game.onrender.com")
 // end up with two separate rooms/listener sets for one player.
 let connecting = false;
 const MAX_AUTO_RETRIES = 5;
+const SLOW_CONNECT_MS = 15000;
 
 export async function connect() {
     if (connecting) {
@@ -44,6 +50,18 @@ async function connectWithRetry() {
     let attempt = 0;
 
     for (;;) {
+        // If the server accepts the connection but never answers (e.g. the
+        // Render instance is waking up or down), the join request neither
+        // succeeds nor fails, so nothing below would ever say so. Report it
+        // without abandoning the request — aborting and retrying could leave a
+        // second session behind if the first one eventually goes through.
+        const slowNotice = setTimeout(() => {
+            showConnectionStatus("Still waiting for the server… it may be starting up or unavailable.", "warn");
+            if (import.meta.env.MODE !== "production" && isDevBuild()) {
+                variable.devLog.push(`… No response from ${SERVER_URL} after ${SLOW_CONNECT_MS / 1000}s. The server may be starting up or unavailable.`);
+            }
+        }, SLOW_CONNECT_MS);
+
         try {
             const room = await attemptConnect();
             hideConnectionStatus();
@@ -51,6 +69,11 @@ async function connectWithRetry() {
         } catch (e) {
             attempt++;
             console.error(`❌ Connection attempt ${attempt} failed:`, e);
+
+            // A network failure is not an auth failure — say which server it was.
+            if (import.meta.env.MODE !== "production" && isDevBuild()) {
+                variable.devLog.push(`✗ Unable to connect to the Colyseus server at ${SERVER_URL} (attempt ${attempt}). Is it running?`);
+            }
 
             if (attempt >= MAX_AUTO_RETRIES) {
                 await new Promise((resolve) => {
@@ -65,6 +88,8 @@ async function connectWithRetry() {
             const delaySeconds = Math.min(10, 2 ** (attempt - 1));
             showConnectionStatus(`Connecting to the server… retrying in ${delaySeconds}s`, "warn");
             await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+        } finally {
+            clearTimeout(slowNotice);
         }
     }
 }
@@ -184,6 +209,7 @@ async function attemptConnect() {
         // No-ops for a normal build/player: the server only ever sends
         // these to a client that presented a devToken on join.
         room.onMessage("devAuthResult", (data) => {
+            variable.devAuthorized = Boolean(data?.ok);
             variable.devLog.push(
                 data?.ok
                     ? "✓ Developer authorization confirmed — commands are live."
@@ -355,10 +381,14 @@ function flushPendingXP() {
 function logDevTokenDiagnostic(joinOptions) {
     const mode = import.meta.env.MODE;
     const message = !import.meta.env.VITE_DEV_SECRET
-        ? `✗ Client configuration error: VITE_DEV_SECRET is not set (Vite mode "${mode}"). Set it in client/.env.devtools and restart the dev server.`
+        ? `✗ Client developer configuration is missing: VITE_DEV_SECRET is not set (Vite mode "${mode}"). Set it in client/.env.devtools and restart the dev server.`
         : !joinOptions.devToken
-            ? `✗ Network configuration error: VITE_DEV_SECRET is set (mode "${mode}") but no devToken was attached to the join request.`
-            : `Dev token attached to join request (Vite mode "${mode}"). Waiting for server authorization…`;
+            ? `✗ Developer token was not included in the connection request (VITE_DEV_SECRET is set, mode "${mode}").`
+            : `Dev token sent to ${SERVER_URL} (Vite mode "${mode}"). Waiting for server authorization…`;
+
+    // Without a token the server never replies with devAuthResult, so this
+    // is already final; with one, commands stay disabled until it replies.
+    variable.devAuthorized = joinOptions.devToken ? null : false;
 
     console.info(`[devauth] ${message}`);
     variable.devLog.push(message);

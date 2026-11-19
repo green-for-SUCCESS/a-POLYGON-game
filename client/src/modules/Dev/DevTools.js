@@ -100,6 +100,15 @@ function _runCommand(text) {
         return;
     }
 
+    // UI-side gate only; the server ignores dev commands from unauthorized
+    // connections regardless.
+    if (variable.devAuthorized !== true) {
+        _log(variable.devAuthorized === false
+            ? "Commands are disabled: developer authorization failed (see above)."
+            : "Commands are disabled until the server confirms developer authorization.");
+        return;
+    }
+
     const [cmd, ...rest] = text.split(/\s+/);
 
     if (cmd === "/ban") {
