@@ -3,30 +3,73 @@ import Phaser from "phaser";
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { getRunXPTotal, getLevelProgress, getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
-import { getPlayerSides, getPlayerSideLength, getRegularPolygonRadius, getRegularPolygonMetrics } from "../../../../shared-data/Geometry.js";
+import { getPlayerSides, getPlayerSideLengthForSides, getRegularPolygonRadius, getRegularPolygonMetrics, getRegularPolygonPoints } from "../../../../shared-data/Geometry.js";
 import { getSpawnZoneEnd } from "../../../../shared-data/Zones.js";
 import { variable } from "../GameValues/LocalVariables.js";
-import { shatterAt } from "./Effects.js";
+import { playDeathPop } from "./Effects.js";
 
 // =====================================================
 // PLAYER POLYGON (level -> sides, constant area)
 // =====================================================
 
+const TEXTURE_PADDING = 4;
+
+function polygonTextureSize(radius) {
+    return Math.ceil(radius * 2) + TEXTURE_PADDING;
+}
+
+// The level-1 triangle has always been drawn at this scale (its texture
+// squeezed into a 2r box, the same as the enemy Triangle still is). Every
+// side count uses this one scale, so the drawn polygon keeps the same area
+// at every evolution instead of drifting with each texture's padding.
+const TRIANGLE_RADIUS = getRegularPolygonRadius(3, getPlayerSideLengthForSides(3));
+const PLAYER_RENDER_SCALE = (TRIANGLE_RADIUS * 2) / polygonTextureSize(TRIANGLE_RADIUS);
+
+// Textures are made on first use and cached in the game-wide texture
+// manager, so each side count is generated once no matter how many players
+// reach it — there is no upper limit on sides.
+function ensurePlayerTexture(scene, sides) {
+    const key = `player-${sides}`;
+    if (scene.textures.exists(key)) {
+        return key;
+    }
+
+    const radius = getRegularPolygonRadius(sides, getPlayerSideLengthForSides(sides));
+    const size = polygonTextureSize(radius);
+    const points = getRegularPolygonPoints(size / 2, size / 2, sides, radius);
+    const g = scene.add.graphics();
+
+    g.fillStyle(0xffffff, 1); // white, so the local/remote tint applies as before
+    g.beginPath();
+    g.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+        g.lineTo(points[i].x, points[i].y);
+    }
+    g.closePath();
+    g.fillPath();
+    g.generateTexture(key, size, size);
+    g.destroy();
+
+    return key;
+}
+
 // Purely cosmetic (+ this client's own, non-authoritative collision box):
-// the level that drives this comes from the server's synced xp/runXP.
+// the level that drives this comes from the server's synced xp/runXP, and
+// the shape is derived from that level alone, so a jump of many levels at
+// once, a reconnect, or a late joiner all land on the right polygon.
 export function applyPlayerPolygon(player, level) {
     const sides = getPlayerSides(level);
     if (player.sides === sides) {
         return;
     }
 
-    const sideLength = getPlayerSideLength(level);
+    const sideLength = getPlayerSideLengthForSides(sides);
     const radius = getRegularPolygonRadius(sides, sideLength);
     const metrics = getRegularPolygonMetrics(sides, sideLength);
-    const displaySize = radius * 2;
     const sprite = player.sprite;
+    const displaySize = polygonTextureSize(radius) * PLAYER_RENDER_SCALE;
 
-    sprite.setTexture(`player-${sides}`);
+    sprite.setTexture(ensurePlayerTexture(sprite.scene, sides));
     sprite.setDisplaySize(displaySize, displaySize);
 
     if (sprite.body) {
@@ -57,7 +100,7 @@ export function createPlayer(id, x, y, playerState) {
     const sprite = variable.sceneRef.physics.add.sprite(
         x,
         y,
-        `player-${sides}`
+        ensurePlayerTexture(variable.sceneRef, sides)
     );
 
     sprite.setCollideWorldBounds(true);
@@ -85,6 +128,7 @@ export function createPlayer(id, x, y, playerState) {
         variable.playerHealth = SETTINGS.PLAYER_BASE_MAX_HEALTH;
         variable.playerMaxHealth = SETTINGS.PLAYER_BASE_MAX_HEALTH;
         variable.myId = id;
+        variable.localDeathPendingCount = null;
 
         // CAMERA
 
@@ -294,13 +338,42 @@ export function setRemotePlayerName(player, name) {
     player.nameTag.setText(label);
 }
 
-export function setRemotePlayerHealth(player, health) {
+export function setRemotePlayerHealth(player, health, maxHealth) {
     if (!player) {
         return;
     }
 
     player.health = health;
+    if (maxHealth > 0) {
+        player.maxHealth = maxHealth;
+    }
     updateRemotePlayerHealthBar(player);
+}
+
+// =====================================================
+// PLAYER DEATH ANIMATION
+// The same grow-and-fade as enemies, played on a one-off copy of the
+// player's sprite so the real sprite (and its physics body) can be hidden,
+// moved and revived straight away without cutting the animation short.
+// The copy has no body and nothing else references it; the tween destroys
+// it. A sprite that is already hidden has nothing to animate, which is also
+// what stops the same death from playing twice (e.g. the offline/local path
+// already played it, then the server's deathCount arrives).
+// =====================================================
+export function playPlayerDeathAnimation(player) {
+    const sprite = player?.sprite;
+    if (!sprite || !sprite.active || !sprite.visible || !sprite.scene) {
+        return;
+    }
+
+    const ghost = sprite.scene.add.image(sprite.x, sprite.y, sprite.texture.key);
+    ghost.setScale(sprite.scaleX, sprite.scaleY);
+    ghost.setRotation(sprite.rotation);
+    ghost.setTint(sprite.tintTopLeft);
+    ghost.setDepth(sprite.depth);
+    ghost.setAlpha(sprite.alpha);
+
+    playDeathPop(sprite.scene, ghost);
 }
 
 export function killRemotePlayer(player) {
@@ -317,15 +390,6 @@ export function killRemotePlayer(player) {
     player.nameTag?.setVisible(false);
     player.hpBg?.setVisible(false);
     player.hpFill?.setVisible(false);
-
-    shatterAt(
-        x,
-        y,
-        0,
-        0,
-        "player",
-        0x00ff00
-    );
 }
 
 export function reviveRemotePlayer(player) {
@@ -343,8 +407,12 @@ function updateRemotePlayerHealthBar(player) {
         return;
     }
 
+    // Max health grows with level, so the bar has to use this player's own
+    // synced maximum (the old fixed PLAYER_MAX_HEALTH showed regen and most
+    // damage as a permanently full bar).
+    const maxHealth = player.maxHealth || SETTINGS.PLAYER_BASE_MAX_HEALTH;
     const percent = Phaser.Math.Clamp(
-        player.health / SETTINGS.PLAYER_MAX_HEALTH,
+        player.health / maxHealth,
         0,
         1
     );
@@ -502,6 +570,11 @@ export function updateHealthBar() {
     variable.healthBarFill.width = 300 * percent;
 }
 
+// How long a client-predicted death waits for the server to confirm it
+// before trusting the server's "still alive" again (e.g. the "suicide"
+// message was lost to a half-open socket or the SDK's reconnect queue).
+const LOCAL_DEATH_CONFIRM_TIMEOUT = 2500; // ms
+
 export function damagePlayer(amount) {
 
     if (!variable.player.active) return;
@@ -528,127 +601,32 @@ export function damagePlayer(amount) {
 
         if (variable.room) {
             variable.room.send("suicide");
+            // See Network.js: the server's confirmation of this death is
+            // the next deathCount; until then stale "alive" patches are ignored.
+            const self = variable.allPlayers[variable.myId];
+            variable.localDeathPendingCount = (self?.deathCount ?? 0) + 1;
+            variable.localDeathPendingUntil = Date.now() + LOCAL_DEATH_CONFIRM_TIMEOUT;
         }
 
-    
-        shatterPlayer();
+        // Played here so client-side deaths (offline, or spikes) react
+        // instantly; Network.js recognises the server's deathCount for this
+        // same death (localDeathPendingCount) and doesn't replay it.
+        playPlayerDeathAnimation(variable.allPlayers[variable.myId]);
+        handleLocalPlayerDeath();
     }
 }
 
 // =====================================================
-// PLAYER SHATTER EFFECT
+// LOCAL PLAYER DEATH
+// Hides the local player and shows the death screen. The visual is
+// playPlayerDeathAnimation (called by whoever detected the death first).
 // =====================================================
 
-export function shatterPlayer() {
+export function handleLocalPlayerDeath() {
     // prevent duplicate deaths
     if (!variable.player.active) return;
 
-    const deathVX = variable.player.body.velocity.x;
-    const deathVY = variable.player.body.velocity.y;
-
-    const pixelSize = 5;
-
-    const piecesPerRow =
-    SETTINGS.PLAYER_SIZE / pixelSize;
-    
-        const startX =
-    variable.player.x - SETTINGS.PLAYER_SIZE / 2;
-    
-        const startY =
-    variable.player.y - SETTINGS.PLAYER_SIZE / 2;
-    
-        // hide player
     variable.player.disableBody(true, true);
-
-    // create chunks
-    for (let py = 0; py < piecesPerRow; py++) {
-    
-        for (let px = 0; px < piecesPerRow; px++) {
-        
-            const pixel =
-            variable.sceneRef.physics.add.image(
-                    startX + px * pixelSize,
-                    startY + py * pixelSize,
-                    'player'
-                );
-
-                pixel.setTint(
-                    variable.player.tint
-                )
-            
-                pixel.setDisplaySize(
-                pixelSize,
-                pixelSize
-            );
-        
-            // =================================================
-            // EXPLOSION VELOCITY
-            // =================================================
-        
-            const dirX =
-            (px - piecesPerRow / 2)
-                * Phaser.Math.FloatBetween(35, 75);
-            
-                const dirY =
-            (py - piecesPerRow / 2)
-                * Phaser.Math.FloatBetween(20, 50);
-            
-                const horizontalSpeed =
-            dirX
-                + Phaser.Math.Between(-120, 120)
-                + deathVX * 0.25;
-            
-                const verticalSpeed =
-            -900
-                + dirY
-                + Phaser.Math.Between(-350, 150)
-                + deathVY * 0.25;
-            
-                pixel.setVelocity(
-                horizontalSpeed,
-                verticalSpeed
-            );
-        
-            // delayed turbulence
-            variable.sceneRef.time.delayedCall(
-                Phaser.Math.Between(50, 180),
-                () => {
-                
-                    if (!pixel.body) return;
-                
-                    pixel.setVelocityX(
-                        pixel.body.velocity.x
-                        + Phaser.Math.Between(-40, 40)
-                    );
-                }
-            );
-        
-            // =================================================
-            // PHYSICS
-            // =================================================
-        
-            pixel.setBounce(0.96);
-        
-            pixel.setDrag(40);
-        
-            pixel.setMass(0.1);
-        
-            pixel.setFriction(1, 0);
-        
-            // slower falling
-            pixel.body.setGravityY(
-                SETTINGS.GRAVITY * 0.28
-            );
-        
-            // no spinning
-            pixel.setAngularVelocity(0);
-        
-            pixel.setAngularDrag(99999);
-        
-            variable.deathPixels.push(pixel);
-        }
-    }
-
     showDeathScreen();
 }
 
@@ -926,15 +904,6 @@ export function respawnPlayer({ immediate = false } = {}) {
     setTimeout(() => {
     
         if (!variable.player || !variable.player.body) return;
-    
-        // remove old death pixels
-        variable.deathPixels.forEach(pixel => {
-            if (pixel && pixel.active) {
-                pixel.destroy();
-            }
-        });
-    
-        variable.deathPixels = [];
     
         variable.player.enableBody(
             true,

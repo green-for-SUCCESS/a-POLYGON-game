@@ -3,7 +3,7 @@
 // =====================================================
 
 import { SETTINGS, ENEMY_RARITY_COLORS } from "../../../../shared-data/Constants.js";
-import { getEnemySides, getEnemyRadius, getRegularPolygonPoints, getPlayerSideLength, getRegularPolygonRadius } from "../../../../shared-data/Geometry.js";
+import { getEnemySides, getEnemyRadius, getRegularPolygonPoints } from "../../../../shared-data/Geometry.js";
 
 export function preload() {
     const base = import.meta.env.BASE_URL;
@@ -12,48 +12,9 @@ export function preload() {
     this.load.image('stone', `${base}assets/Stone.png`);
     this.load.image('spike', `${base}assets/Spikes.png`);
 
-    // PLAYER
-
-    const p = this.add.graphics();
-
-    p.fillStyle(0xffffff, 1);
-
-    p.fillRect(
-        0,
-        0,
-        SETTINGS.PLAYER_SIZE,
-        SETTINGS.PLAYER_SIZE
-    );
-
-    p.generateTexture(
-        'player',
-        SETTINGS.PLAYER_SIZE,
-        SETTINGS.PLAYER_SIZE
-    );
-
-    p.destroy();
-
-    // PLAYER POLYGON (per level, white so tint works the same as the old square)
-    // Level 1 == a triangle identical to the enemy Triangle; every later level
-    // trades side length for side count, keeping area constant (see Geometry.js).
-    for (let sides = 3; sides <= 7; sides++) {
-        const sideLength = getPlayerSideLength(sides - 2); // level = sides - 2
-        const radius = getRegularPolygonRadius(sides, sideLength);
-        const size = Math.ceil(radius * 2) + 4;
-        const pg = this.add.graphics();
-        const points = getRegularPolygonPoints(size / 2, size / 2, sides, radius);
-
-        pg.fillStyle(0xffffff, 1);
-        pg.beginPath();
-        pg.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-            pg.lineTo(points[i].x, points[i].y);
-        }
-        pg.closePath();
-        pg.fillPath();
-        pg.generateTexture(`player-${sides}`, size, size);
-        pg.destroy();
-    }
+    // PLAYER polygon textures (player-3, player-4, ...) are generated on
+    // first use by ensurePlayerTexture in Entities/Players.js, since side
+    // count has no upper limit any more.
 
     for (let rarity = 0; rarity <= SETTINGS.ENEMY_RARITY_MAX; rarity++) {
         const sides = getEnemySides(rarity);

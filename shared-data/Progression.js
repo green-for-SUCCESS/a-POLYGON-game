@@ -38,8 +38,30 @@ export function getTotalXPForLevel(level) {
     return base * (growth ** (lvl - 1) - 1) / (growth - 1);
 }
 
+// The one normalisation every XP value goes through (server and client).
+// There is no progression ceiling: XP is any finite, non-negative whole
+// number. Values stay exact integers up to Number.MAX_SAFE_INTEGER (2^53-1,
+// ~level 138); above that they are ordinary doubles — still carried exactly by
+// the schema, msgpack, JSON and Firestore, but integer arithmetic on them is
+// approximate. Infinity is the one thing no transport survives (the schema
+// turns it into 2^53-1, JSON into null), so it is clamped to the largest
+// finite double instead; NaN and negatives become 0.
+export function sanitizeXP(value) {
+    const amount = Number(value);
+
+    if (Number.isNaN(amount) || amount <= 0) {
+        return 0;
+    }
+
+    if (!Number.isFinite(amount)) {
+        return Number.MAX_VALUE;
+    }
+
+    return Math.floor(amount);
+}
+
 export function getLevelFromXP(xp) {
-    const amount = Math.max(0, Number(xp) || 0);
+    const amount = sanitizeXP(xp);
     const base = SETTINGS.LEVEL_XP_BASE;
     const growth = SETTINGS.LEVEL_XP_GROWTH;
 
@@ -47,11 +69,23 @@ export function getLevelFromXP(xp) {
         return 1;
     }
 
-    const level = Math.floor(
+    // The closed-form inverse is only an estimate in floating point (it is
+    // off by one at some thresholds above ~level 120), so correct it against
+    // getTotalXPForLevel itself — the level is then exactly "the highest level
+    // whose threshold this XP has reached", on client and server alike.
+    let level = Math.max(1, Math.floor(
         1 + Math.log(amount * (growth - 1) / base + 1) / Math.log(growth)
-    );
+    ));
 
-    return Math.max(1, level);
+    while (getTotalXPForLevel(level + 1) <= amount) {
+        level++;
+    }
+
+    while (level > 1 && getTotalXPForLevel(level) > amount) {
+        level--;
+    }
+
+    return level;
 }
 
 export function getXPToNextLevel(level, xp) {
@@ -67,12 +101,14 @@ export function getRunXPTotal(persistentXP, runXP) {
 // exactly-on-boundary xp, and arbitrarily large xp (no NaN/Infinity: span is
 // clamped to >= 0 and division is guarded).
 export function getLevelProgress(xp) {
-    const amount = Math.max(0, Number(xp) || 0);
+    const amount = sanitizeXP(xp);
     const level = getLevelFromXP(amount);
     const levelStartXP = getTotalXPForLevel(level);
     const levelEndXP = getTotalXPForLevel(level + 1);
     const intoLevel = Math.max(0, amount - levelStartXP);
-    const span = Math.max(0, levelEndXP - levelStartXP);
+    // Past the largest representable XP the next threshold overflows to
+    // Infinity; report a full bar rather than an "/Infinity" span.
+    const span = Number.isFinite(levelEndXP) ? Math.max(0, levelEndXP - levelStartXP) : 0;
     const progress = span > 0 ? Math.min(1, intoLevel / span) : 1;
 
     return { level, xp: amount, intoLevel, span, progress };

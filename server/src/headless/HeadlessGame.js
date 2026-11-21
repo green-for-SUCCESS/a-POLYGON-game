@@ -3,10 +3,11 @@ import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
-import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity } from "../../../shared-data/Progression.js";
+import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity, sanitizeXP } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
+import { resetPlayerHealthTimers, tickPlayerRegen } from "./PlayerHealth.js";
 
 export class HeadlessGame {
 
@@ -73,6 +74,7 @@ export class HeadlessGame {
         player.fastfallDenied = false;
         player.slashCooldownRemaining = 0;
         player.runEnded = false;
+        resetPlayerHealthTimers(player);
     }
 
     applyPlayerInput(sessionId, data) {
@@ -211,7 +213,7 @@ export class HeadlessGame {
     // no separate dev-only XP/database mechanism to keep in sync.
     // ---------------------------------------------------------------
     _applyAuthoritativeXP(sessionId, player, xp) {
-        player.xp = Math.max(0, Math.min(SETTINGS.DEV_XP_MAX, Math.floor(xp)));
+        player.xp = sanitizeXP(xp);
 
         const stats = getPlayerStatsFromXP(player.xp);
         player._stats = stats;
@@ -284,6 +286,14 @@ export class HeadlessGame {
             const hits = tickEnemyAttack(body, deltaMs);
             if (hits?.length) {
                 this.pendingKnockbacks.push(...hits);
+            }
+        }
+
+        // After this tick's enemy attacks, so a hit landing now restarts the
+        // regen delay before any healing is applied for the tick.
+        if (this.players) {
+            for (const [, player] of this.players) {
+                tickPlayerRegen(player, deltaMs);
             }
         }
 
@@ -459,8 +469,12 @@ export class HeadlessGame {
 
         player.runEnded = true;
         player.health = 0;
-        player.xp = (player.xp || 0) + (player.runXP || 0);
+        player.xp = sanitizeXP((player.xp || 0) + (player.runXP || 0));
         player.runXP = 0;
+        // Synced death counter: each death is a distinct event for clients,
+        // even if the respawn lands in the same state patch as the death.
+        player.deathCount = (player.deathCount || 0) + 1;
+        resetPlayerHealthTimers(player);
 
         this.pendingPersists.push({
             sessionId,

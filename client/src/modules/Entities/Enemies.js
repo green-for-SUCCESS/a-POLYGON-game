@@ -1,10 +1,9 @@
 import { SETTINGS, ENEMY_STATE, ENEMY_RARITY_COLORS } from "../../../../shared-data/Constants.js";
 import { getEnemyRadius } from "../../../../shared-data/Geometry.js";
 import { variable } from "../GameValues/LocalVariables.js";
+import { playDeathPop } from "./Effects.js";
 
 const HIT_FLASH_DURATION = 100; // ms
-const DEATH_DURATION = 200; // ms
-const DEATH_SCALE = 1.6;
 
 // Keyed by the server's enemy id. The server only ever removes an enemy
 // from its state when it dies (HeadlessGame._killEnemy), so an id that was
@@ -77,22 +76,11 @@ export function applyEnemySnapshot(snapshot) {
     }
 }
 
-// Grow-and-fade on the enemy's own sprite: no new objects, physics bodies
-// or timers, just one tween that destroys the sprite when it finishes. The
-// visual has already left visualsById, so nothing else touches it and a
-// later snapshot can't restart or interrupt it.
+// The pop runs on the enemy's own sprite. The visual has already left
+// visualsById, so nothing else touches it and a later snapshot can't restart
+// or interrupt it.
 function playEnemyDeath(scene, visual) {
-    const sprite = visual.sprite;
-
-    scene.tweens.add({
-        targets: sprite,
-        scaleX: sprite.scaleX * DEATH_SCALE,
-        scaleY: sprite.scaleY * DEATH_SCALE,
-        alpha: 0,
-        duration: DEATH_DURATION,
-        ease: "Quad.easeOut",
-        onComplete: () => sprite.destroy(),
-    });
+    playDeathPop(scene, visual.sprite);
 }
 
 function createEnemyVisual(scene, snap) {

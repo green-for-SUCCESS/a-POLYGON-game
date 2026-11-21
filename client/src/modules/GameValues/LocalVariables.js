@@ -32,8 +32,13 @@ export const variable = {
     stoneH: null,
     blockWidth: null,
     blockHeight: null,
-    deathPixels: [],
     deathScreen: null,
+    // Set while a death this client predicted (spikes / offline suicide path)
+    // waits for the server's matching deathCount. See Network.js.
+    localDeathPendingCount: null,
+    localDeathPendingUntil: 0,
+    // True between a reconnect handshake and the state the server re-sends.
+    awaitingReconnectState: false,
     sceneRef: null,
     enemies: {},
     enemyVisuals: [],

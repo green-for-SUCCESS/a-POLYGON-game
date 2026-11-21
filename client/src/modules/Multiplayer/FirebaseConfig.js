@@ -19,6 +19,7 @@ import {
     runTransaction,
     serverTimestamp
 } from "firebase/firestore";
+import { sanitizeXP } from "../../../../shared-data/Progression.js";
 
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -95,7 +96,7 @@ export async function getSession() {
     return {
         user,
         username: profile?.username ?? null,
-        xp: Math.max(0, Math.floor(Number(profile?.xp) || 0))
+        xp: sanitizeXP(profile?.xp)
     };
 }
 
@@ -107,7 +108,7 @@ export async function signInWithGoogle() {
     return {
         user: result.user,
         username: profile?.username ?? null,
-        xp: Math.max(0, Math.floor(Number(profile?.xp) || 0))
+        xp: sanitizeXP(profile?.xp)
     };
 }
 
@@ -182,7 +183,7 @@ export async function persistXP(xp) {
     const { db: firestore } = getFirebase();
     await setDoc(
         doc(firestore, "users", user.uid),
-        { xp: Math.max(0, Math.floor(Number(xp) || 0)) },
+        { xp: sanitizeXP(xp) },
         { merge: true }
     );
 }

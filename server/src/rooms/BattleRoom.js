@@ -3,7 +3,7 @@ import { BattleRoomState } from "./schema/BattleRoomState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
-import { SETTINGS } from "../../../shared-data/Constants.js";
+import { sanitizeXP } from "../../../shared-data/Progression.js";
 import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze } from "../firebaseAdmin.js";
 
 export class BattleRoom extends Room {
@@ -237,12 +237,10 @@ export class BattleRoom extends Room {
 
     _handleDevXPCommand(client, data, mode) {
         const amount = Number(data?.amount);
+        // No upper bound: any finite amount is accepted, and the result goes
+        // through sanitizeXP (floored, never negative, never Infinity).
         if (!Number.isFinite(amount)) {
             return `Usage: /${mode === "give" ? "givexp <amount> [player]" : "setxp <amount> [player]"}`;
-        }
-
-        if (Math.abs(amount) > SETTINGS.DEV_XP_MAX) {
-            return `Amount out of range (max ${SETTINGS.DEV_XP_MAX}).`;
         }
 
         if (mode === "set" && amount < 0) {
@@ -379,7 +377,7 @@ export class BattleRoom extends Room {
     async onJoin(client, options) {
         const player = new PlayerState();
         player.name = sanitizePlayerName(options?.username || options?.name);
-        player.xp = Math.max(0, Math.floor(Number(options?.xp) || 0));
+        player.xp = sanitizeXP(options?.xp);
         this.game.applyRunStart(player);
         // Restore a durable /togglefreezexp setting for returning verified
         // accounts; anonymous/guest sessions simply start unfrozen (there's

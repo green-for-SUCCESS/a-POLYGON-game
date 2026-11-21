@@ -4,6 +4,7 @@ import { SETTINGS, ENEMY_STATE } from "../../../shared-data/Constants.js";
 import { getEnemyBodyMetrics } from "../../../shared-data/Geometry.js";
 import { applyKnockbackToVelocity } from "../../../shared-data/Combat.js";
 import { stepDragVelocity } from "../../../shared-data/Movement.js";
+import { applyPlayerDamage } from "./PlayerHealth.js";
 
 function enemyCenterX(enemy) {
     return enemy.x + enemy.width / 2;
@@ -322,7 +323,7 @@ function _damagePlayersInFan(enemy, players) {
         while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
         if (Math.abs(angleDiff) <= halfSweep) {
-            player.health = Math.max(0, player.health - enemy.damage);
+            applyPlayerDamage(player, enemy.damage);
             hits.push({
                 sessionId,
                 pusherX: enemy.attackOriginX,

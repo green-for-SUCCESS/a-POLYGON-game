@@ -105,13 +105,14 @@ export const SETTINGS = {
     LEVEL_XP_BASE: 100,
     LEVEL_XP_GROWTH: 1.25,
 
-    // Sanity bound for developer /givexp and /setxp — keeps XP numerically
-    // sane (no Infinity/overflow abuse) without being so low it gets in the
-    // way of testing high-level stats/polygon geometry.
-    DEV_XP_MAX: 10000000,
-
     PLAYER_BASE_MAX_HEALTH: 20,
     PLAYER_HEALTH_GROWTH: 1.05,
+
+    // Passive regeneration (server-authoritative, see server/src/headless/
+    // PlayerHealth.js): after this long without taking damage, heal at the
+    // base rate. Deliberately not scaled by level.
+    PLAYER_REGEN_DELAY: 3000, // ms without damage before healing starts
+    PLAYER_REGEN_RATE: 4,     // HP per second
     PLAYER_BASE_DAMAGE: 5,
     PLAYER_DAMAGE_GROWTH: 1.05,
 

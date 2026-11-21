@@ -3,11 +3,11 @@ import { Callbacks, CloseCode } from "@colyseus/sdk";
 
 import { variable } from "../GameValues/LocalVariables.js";
 
-import { createPlayer, applyPlayerPolygon, shatterPlayer, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
+import { createPlayer, applyPlayerPolygon, handleLocalPlayerDeath, playPlayerDeathAnimation, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
 import { getSession, persistXP } from "./FirebaseConfig.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
-import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
+import { getPlayerLevelFromState, sanitizeXP } from "../../../../shared-data/Progression.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
 import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
@@ -158,6 +158,17 @@ async function attemptConnect() {
 
     room.onReconnect(() => {
         hideConnectionStatus();
+        // The server re-sends the room state right after this handshake.
+        // Deaths that happened while we were away are already over, so that
+        // first state only re-baselines each player's deathCount instead of
+        // replaying a death pop at a position up to ~30s stale.
+        variable.awaitingReconnectState = true;
+    });
+
+    // Fires after each decoded state/patch, i.e. after the onChange
+    // callbacks below have run for it.
+    room.onStateChange(() => {
+        variable.awaitingReconnectState = false;
     });
 
     room.onLeave((code) => {
@@ -226,7 +237,7 @@ async function attemptConnect() {
         });
 
         room.onMessage("persistXP", (data) => {
-            const nextXP = Math.max(0, Math.floor(Number(data?.xp) || 0));
+            const nextXP = sanitizeXP(data?.xp);
             variable.persistentXP = nextXP;
             variable.runXP = 0;
             updateProgressHud();
@@ -237,12 +248,14 @@ async function attemptConnect() {
 
         callbacks.onAdd("players", (playerState, sessionId) => {
             const p = createPlayer(sessionId, playerState.x, playerState.y, playerState);
+            // Deaths that happened before we saw this player aren't replayed.
+            p.deathCount = playerState.deathCount ?? 0;
 
             if (p.isLocal) {
                 applyLocalPlayerState(playerState);
             } else {
                 setRemotePlayerName(p, playerState.name);
-                setRemotePlayerHealth(p, playerState.health);
+                setRemotePlayerHealth(p, playerState.health, playerState.maxHealth);
                 if (playerState.health <= 0) {
                     p.sprite.setVisible(false);
                     p.dead = true;
@@ -253,6 +266,24 @@ async function attemptConnect() {
                 const isLocal = sessionId === variable.playerId;
                 const remote = variable.allPlayers[sessionId];
 
+                // The server bumps deathCount exactly once per death, so this
+                // fires once even if the death and the respawn arrive in the
+                // same patch (health never visibly reaching 0). It runs before
+                // anything below moves or hides the sprite, so the animation
+                // plays where the player was last drawn.
+                const deathCount = playerState.deathCount ?? 0;
+                const pendingDeath = isLocal ? variable.localDeathPendingCount : null;
+                if (remote && deathCount !== remote.deathCount) {
+                    const died = deathCount > (remote.deathCount ?? 0);
+                    remote.deathCount = deathCount;
+                    // A local death this client predicted (damagePlayer) has
+                    // already played its pop; this is the server confirming it.
+                    const alreadyPlayed = pendingDeath != null && deathCount >= pendingDeath;
+                    if (died && !alreadyPlayed && !variable.awaitingReconnectState) {
+                        playPlayerDeathAnimation(remote);
+                    }
+                }
+
                 if (!isLocal && remote) {
                     remote.targetX = playerState.x;
                     remote.targetY = playerState.y;
@@ -261,7 +292,7 @@ async function attemptConnect() {
 
                     const prevHealth = remote.health;
                     const nextHealth = playerState.health;
-                    setRemotePlayerHealth(remote, nextHealth);
+                    setRemotePlayerHealth(remote, nextHealth, playerState.maxHealth);
 
                     if (prevHealth > 0 && nextHealth <= 0) {
                         killRemotePlayer(remote);
@@ -288,11 +319,34 @@ async function attemptConnect() {
                     if (remote) {
                         applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
                     }
+
+                    if (pendingDeath != null) {
+                        // After a client-predicted death (damagePlayer sent
+                        // "suicide"), patches the server produced before it
+                        // processed that message still show us alive. Treating
+                        // them as a respawn would revive the player and then
+                        // kill them a second time, so hold the death until the
+                        // server's deathCount (or its own health of 0) agrees.
+                        // The hold is bounded: after a timeout, or on the full
+                        // state re-sent after a reconnect, the server is taken
+                        // at its word (the old behaviour), so a "suicide" that
+                        // never arrived can't leave the player stuck dead.
+                        const stillWaiting =
+                            deathCount < pendingDeath &&
+                            next > 0 &&
+                            !variable.awaitingReconnectState &&
+                            Date.now() < variable.localDeathPendingUntil;
+                        if (stillWaiting) {
+                            return;
+                        }
+                        variable.localDeathPendingCount = null;
+                    }
+
                     variable.playerHealth = next;
                     updateHealthBar();
 
                     if (prev > 0 && next <= 0) {
-                        shatterPlayer();
+                        handleLocalPlayerDeath();
                     } else if (prev <= 0 && next > 0) {
                         respawnPlayer({ immediate: true });
                     }

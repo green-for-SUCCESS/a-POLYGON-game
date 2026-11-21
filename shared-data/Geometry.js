@@ -69,12 +69,34 @@ export function getRegularPolygonSideForArea(area, sides) {
 }
 
 const PLAYER_MIN_SIDES = 3;
-const PLAYER_MAX_SIDES = 7;
 
-// Level 1 -> triangle, Level 5+ -> heptagon (capped). Never more than 7 sides.
+// Polygon evolution, with no upper limit. Each evolution takes 10 more levels
+// than the previous one: triangle -> square takes 15, square -> pentagon 25,
+// pentagon -> hexagon 35, and so on. Evolution k therefore costs 5 + 10k
+// levels, so a player with 3 + k sides has reached level
+//   1 + sum_{i=1..k} (5 + 10i) = 1 + 10k + 5k^2
+// (square at 16, pentagon at 41, hexagon at 76, heptagon at 121, octagon at
+// 176, ..., dodecagon at 496). This is the only place the thresholds live;
+// everything else derives the shape from the level through getPlayerSides.
+export function getPlayerEvolutionLevel(sides) {
+    const k = Math.max(0, Math.floor(sides) - PLAYER_MIN_SIDES);
+    return 1 + 10 * k + 5 * k * k;
+}
+
 export function getPlayerSides(level) {
-    const lvl = Math.max(1, level | 0);
-    return Math.min(PLAYER_MIN_SIDES + (lvl - 1), PLAYER_MAX_SIDES);
+    const lvl = Number.isFinite(level) ? Math.max(1, Math.floor(level)) : 1;
+
+    // Invert 1 + 10k + 5k^2 <= level, then correct for floating-point error
+    // so the result always agrees exactly with getPlayerEvolutionLevel.
+    let k = Math.max(0, Math.floor((Math.sqrt(80 + 20 * lvl) - 10) / 10));
+    while (getPlayerEvolutionLevel(PLAYER_MIN_SIDES + k + 1) <= lvl) {
+        k++;
+    }
+    while (k > 0 && getPlayerEvolutionLevel(PLAYER_MIN_SIDES + k) > lvl) {
+        k--;
+    }
+
+    return PLAYER_MIN_SIDES + k;
 }
 
 // The player's Level-1 triangle is defined to be IDENTICAL to the enemy
@@ -85,8 +107,12 @@ export function getPlayerTargetArea() {
     return getRegularPolygonArea(SETTINGS.ENEMY_SIDE_LENGTH, PLAYER_MIN_SIDES);
 }
 
+export function getPlayerSideLengthForSides(sides) {
+    return getRegularPolygonSideForArea(getPlayerTargetArea(), sides);
+}
+
 export function getPlayerSideLength(level) {
-    return getRegularPolygonSideForArea(getPlayerTargetArea(), getPlayerSides(level));
+    return getPlayerSideLengthForSides(getPlayerSides(level));
 }
 
 export function getPlayerPolygonMetrics(level) {
