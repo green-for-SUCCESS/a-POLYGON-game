@@ -17,7 +17,7 @@ import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.j
 // Every build — including the dev-tools build served locally by Vite —
 // talks to the deployed Render server. Dev auth is validated there against
 // the DEV_SECRET configured in Render's environment settings.
-const SERVER_URL = "wss://a-polygon-game.onrender.com";
+const SERVER_URL = "https://a-polygon-game.onrender.com";
 
 export const client = new Colyseus.Client(SERVER_URL);
 
