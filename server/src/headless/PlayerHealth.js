@@ -17,13 +17,20 @@ export function resetPlayerHealthTimers(player) {
 
 // Every source of damage goes through here; it is what restarts the regen
 // delay. A hit that deals no damage does not count as taking damage.
-export function applyPlayerDamage(player, amount) {
+// `source` (optional) attributes the hit to another player for FFA kill
+// credit: { attackerId, atMs }. Enemy hits pass nothing, so they never count
+// as, or overwrite, a player's hit.
+export function applyPlayerDamage(player, amount, source = null) {
     if (!(amount > 0)) {
         return;
     }
 
     player.health = Math.max(0, player.health - amount);
     resetPlayerHealthTimers(player);
+
+    if (source) {
+        player.lastPvpHit = { attackerId: source.attackerId, atMs: source.atMs };
+    }
 }
 
 // Base rate plus a bonus hook for future stat modifiers (e.g. corner relics):

@@ -8,6 +8,8 @@ import { getSession, persistXP } from "./FirebaseConfig.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
 import { getPlayerLevelFromState, sanitizeXP } from "../../../../shared-data/Progression.js";
+import { GAME_MODES, ROOM_NAMES, normalizeGameMode } from "../../../../shared-data/GameModes.js";
+import { loadGuestProfile, saveGuestXP } from "./GuestStore.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
 import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
@@ -15,7 +17,7 @@ import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.j
 // Every build — including the dev-tools build served locally by Vite —
 // talks to the deployed Render server. Dev auth is validated there against
 // the DEV_SECRET configured in Render's environment settings.
-const SERVER_URL = "https://a-polygon-game.onrender.com";
+const SERVER_URL = "wss://a-polygon-game.onrender.com";
 
 export const client = new Colyseus.Client(SERVER_URL);
 
@@ -99,27 +101,50 @@ async function attemptConnect() {
     let xp = variable.persistentXP || 0;
     let idToken = null;
 
-    try {
-        const session = await getSession();
-        if (session?.username) {
-            username = session.username;
-            variable.username = session.username;
+    // Fixed for the lifetime of this connection: where its progression is
+    // saved never follows later changes to the global identity (e.g. the
+    // player went back to Home and signed in while this join was pending).
+    const identity = variable.identity === "guest" ? "guest" : "account";
+
+    if (identity === "guest") {
+        // Guest Mode: progression comes from this browser's local save and
+        // nothing touches Firebase (no session lookup, no ID token), even if
+        // the browser happens to hold a Firebase sign-in. Re-read on every
+        // attempt so a reconnect uses the latest saved XP.
+        const { profile } = loadGuestProfile();
+        username = profile.name;
+        xp = profile.xp;
+        variable.username = profile.name;
+        variable.persistentXP = profile.xp;
+    } else {
+        try {
+            const session = await getSession();
+            if (session?.username) {
+                username = session.username;
+                variable.username = session.username;
+            }
+            if (session?.xp != null) {
+                xp = session.xp;
+                variable.persistentXP = session.xp;
+            }
+            if (session?.user) {
+                // Lets the server verify who this is (for ban checks) instead
+                // of trusting the free-text username alone. Safe to send from
+                // every build: it's the player's own per-session token, not a
+                // secret, and the server only uses it to read their uid.
+                idToken = await session.user.getIdToken();
+            }
+        } catch {
         }
-        if (session?.xp != null) {
-            xp = session.xp;
-            variable.persistentXP = session.xp;
-        }
-        if (session?.user) {
-            // Lets the server verify who this is (for ban checks) instead
-            // of trusting the free-text username alone. Safe to send from
-            // every build: it's the player's own per-session token, not a
-            // secret, and the server only uses it to read their uid.
-            idToken = await session.user.getIdToken();
-        }
-    } catch {
     }
 
-    const joinOptions = { username, xp, idToken };
+    // The mode is chosen by which room type we join; the server enforces
+    // that room's rules. FFA ignores persistent XP, so it isn't sent there.
+    const requestedMode = normalizeGameMode(variable.gameMode);
+    const joinOptions = { username, idToken };
+    if (requestedMode === GAME_MODES.MAIN) {
+        joinOptions.xp = xp;
+    }
 
     // Only the separate developer build ever sets isDevBuild(true), and
     // only that build's own env has VITE_DEV_SECRET — a normal production
@@ -136,7 +161,16 @@ async function attemptConnect() {
         logDevTokenDiagnostic(joinOptions);
     }
 
-    const room = await client.joinOrCreate("battle", joinOptions);
+    const room = await client.joinOrCreate(ROOM_NAMES[requestedMode], joinOptions);
+
+    // A join that was started under a different identity or mode than the
+    // session now running is stale (the player changed account/guest or mode
+    // while it was pending). Leave it instead of adopting it, so it can never
+    // save one provider's XP into the other's store.
+    if (variable.identity !== identity || normalizeGameMode(variable.gameMode) !== requestedMode) {
+        room.leave();
+        throw new Error("Discarded a join started for a different session.");
+    }
 
     console.log("✅ Connected!");
     console.log("Room:", room.roomId);
@@ -237,16 +271,24 @@ async function attemptConnect() {
         });
 
         room.onMessage("persistXP", (data) => {
+            // Only main mode has persistent progression. The server never
+            // sends this from an FFA room; ignoring it here as well means FFA
+            // XP can't reach a save even if that ever changed.
+            if (syncGameMode(room) !== GAME_MODES.MAIN) {
+                return;
+            }
+
             const nextXP = sanitizeXP(data?.xp);
             variable.persistentXP = nextXP;
             variable.runXP = 0;
             updateProgressHud();
-            persistXPWithRetry(nextXP);
+            saveProgress(identity, nextXP);
         });
 
         const callbacks = Callbacks.get(room);
 
         callbacks.onAdd("players", (playerState, sessionId) => {
+            syncGameMode(room);
             const p = createPlayer(sessionId, playerState.x, playerState.y, playerState);
             // Deaths that happened before we saw this player aren't replayed.
             p.deathCount = playerState.deathCount ?? 0;
@@ -265,6 +307,7 @@ async function attemptConnect() {
             callbacks.onChange(playerState, () => {
                 const isLocal = sessionId === variable.playerId;
                 const remote = variable.allPlayers[sessionId];
+                const mode = syncGameMode(room);
 
                 // The server bumps deathCount exactly once per death, so this
                 // fires once even if the death and the respawn arrive in the
@@ -288,7 +331,7 @@ async function attemptConnect() {
                     remote.targetX = playerState.x;
                     remote.targetY = playerState.y;
                     setRemotePlayerName(remote, playerState.name);
-                    applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
+                    applyPlayerPolygon(remote, getPlayerLevelFromState(playerState, mode));
 
                     const prevHealth = remote.health;
                     const nextHealth = playerState.health;
@@ -317,7 +360,7 @@ async function attemptConnect() {
 
                     applyLocalPlayerState(playerState);
                     if (remote) {
-                        applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
+                        applyPlayerPolygon(remote, getPlayerLevelFromState(playerState, mode));
                     }
 
                     if (pendingDeath != null) {
@@ -363,10 +406,34 @@ async function attemptConnect() {
     // instant they do) shouldn't lose XP they already earned just because
     // this one write failed — try again a few times, and if that's still
     // not enough, stash it so a later page load can finish the job instead
-    // of silently discarding it.
-    flushPendingXP();
+    // of silently discarding it. Firebase accounts only: guest saves are
+    // local and synchronous, so they never leave anything pending.
+    if (identity !== "guest") {
+        flushPendingXP();
+    }
 
     return room;
+}
+
+// The server's mode for this room (BattleRoomState.mode) is authoritative;
+// the requested mode is only used until the first state arrives.
+function syncGameMode(room) {
+    if (room?.state?.mode) {
+        variable.gameMode = normalizeGameMode(room.state.mode);
+    }
+    return variable.gameMode;
+}
+
+// Persistent main-mode progression goes to exactly one provider: the one
+// this connection was opened for (Home screen choice), not whether Firebase
+// happens to have a signed-in user.
+function saveProgress(identity, xp) {
+    if (identity === "guest") {
+        saveGuestXP(xp);
+        return;
+    }
+
+    persistXPWithRetry(xp);
 }
 
 const PENDING_XP_KEY = "pendingPersistXP";
@@ -453,11 +520,17 @@ function applyLocalPlayerState(playerState) {
         variable.playerMaxHealth = playerState.maxHealth;
     }
 
-    if (playerState.xp != null) {
-        variable.persistentXP = playerState.xp;
+    if (variable.gameMode === GAME_MODES.FFA) {
+        // FFA progression is the run's temporary XP. The persistent XP held
+        // on this client is left exactly as it was.
+        variable.ffaXP = sanitizeXP(playerState.ffaXP);
+    } else {
+        if (playerState.xp != null) {
+            variable.persistentXP = playerState.xp;
+        }
+        variable.runXP = playerState.runXP ?? 0;
     }
 
-    variable.runXP = playerState.runXP ?? 0;
     variable.spawnExited = !!playerState.spawnExited;
     variable.fastfallReady = playerState.fastfallReady !== false;
     updateProgressHud();

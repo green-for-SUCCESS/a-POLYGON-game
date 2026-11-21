@@ -1,18 +1,75 @@
 import { getSession, signOut } from "../Multiplayer/FirebaseConfig.js";
+import { loadGuestProfile } from "../Multiplayer/GuestStore.js";
 import { getLevelProgress } from "../../../../shared-data/Progression.js";
+import { GAME_MODES } from "../../../../shared-data/GameModes.js";
 import { variable } from "../GameValues/LocalVariables.js";
 
 // =====================================================
 // HOME SCREEN
 // =====================================================
+//
+// Three states:
+//   account  - signed in with Firebase: progression is the account's.
+//   guest    - "Continue as Guest" chosen: progression is this browser's
+//              local guest save (GuestStore.js). Firebase is never written.
+//   choose   - signed out: pick LOGIN or CONTINUE AS GUEST.
+// Account and guest progression are never mixed; signing in while a guest
+// save exists just loads the account and leaves the guest save untouched.
 
 export function createHome(session) {
 
     const isLoggedIn = Boolean(session?.username);
+
+    // A Firebase sign-in always wins: the guest view is only offered while
+    // signed out, so one session can never have both providers.
+    if (isLoggedIn) {
+        variable.identity = "account";
+    }
+
+    const isGuest = !isLoggedIn && variable.identity === "guest";
+    const guest = isGuest ? loadGuestProfile() : null;
+
     const { width, height } = this.scale;
     const scene = this;
 
     this.cameras.main.setBackgroundColor(0x000000);
+
+    // =================================================
+    // BUTTON HELPER
+    // =================================================
+
+    function addButton(x, y, w, h, label, fontSize, onClick, radius = 20) {
+        const bg = scene.add.graphics();
+
+        function draw(color) {
+            bg.clear();
+            bg.fillStyle(color, 0.95);
+            bg.fillRoundedRect(x, y, w, h, radius);
+            bg.lineStyle(3, 0xffffff, 1);
+            bg.strokeRoundedRect(x, y, w, h, radius);
+        }
+
+        draw(0x222222);
+
+        const hit = scene.add.rectangle(x, y, w, h, 0x000000, 0);
+        hit.setOrigin(0).setInteractive({ useHandCursor: true });
+
+        const text = scene.add.text(x + w / 2, y + h / 2, label, {
+            fontSize,
+            fontFamily: "Ubuntu",
+            color: "#ffffff"
+        });
+        text.setOrigin(0.5);
+
+        hit.on("pointerdown", () => draw(0x1a1a1a));
+        hit.on("pointerout", () => draw(0x222222));
+        hit.on("pointerup", () => {
+            draw(0x222222);
+            onClick();
+        });
+
+        return { bg, hit, text };
+    }
 
     // =================================================
     // TITLE
@@ -70,15 +127,22 @@ export function createHome(session) {
     // =================================================
 
     const pad = 24;
-    const logoutW = 140;
-    const logoutH = 40;
-    const logoutX = width - pad - logoutW;
-    const logoutY = pad;
+    const cornerW = 140;
+    const cornerH = 40;
+    const cornerX = width - pad - cornerW;
+    const cornerY = pad;
+    const hasCornerButton = isLoggedIn || isGuest;
+
+    const statusLabel = isLoggedIn
+        ? `Signed in as: ${session.username}`
+        : isGuest
+            ? `Guest: ${guest.profile.name}`
+            : "Signed out";
 
     const statusText = this.add.text(
-        isLoggedIn ? logoutX - 16 : width - pad,
-        logoutY + logoutH / 2,
-        isLoggedIn ? `Signed in as: ${session.username}` : "Signed out",
+        hasCornerButton ? cornerX - 16 : width - pad,
+        cornerY + cornerH / 2,
+        statusLabel,
         {
             fontSize: "22px",
             fontFamily: "Ubuntu",
@@ -89,63 +153,22 @@ export function createHome(session) {
     statusText.setOrigin(1, 0.5);
 
     if (isLoggedIn) {
-
-        const logoutBg = this.add.graphics();
-
-        function drawLogout(color) {
-            logoutBg.clear();
-            logoutBg.fillStyle(color, 0.95);
-            logoutBg.fillRoundedRect(logoutX, logoutY, logoutW, logoutH, 14);
-            logoutBg.lineStyle(2, 0xffffff, 1);
-            logoutBg.strokeRoundedRect(logoutX, logoutY, logoutW, logoutH, 14);
-        }
-
-        drawLogout(0x222222);
-
-        const logoutHit = this.add.rectangle(
-            logoutX,
-            logoutY,
-            logoutW,
-            logoutH,
-            0x000000,
-            0
-        );
-
-        logoutHit
-            .setOrigin(0)
-            .setInteractive({ useHandCursor: true });
-
-        const logoutText = this.add.text(
-            logoutX + logoutW / 2,
-            logoutY + logoutH / 2,
-            "LOGOUT",
-            {
-                fontSize: "18px",
-                fontFamily: "Ubuntu",
-                color: "#ffffff"
-            }
-        );
-
-        logoutText.setOrigin(0.5);
-
-        logoutHit.on("pointerdown", () => {
-            drawLogout(0x1a1a1a);
-        });
-
-        logoutHit.on("pointerout", () => {
-            drawLogout(0x222222);
-        });
-
-        logoutHit.on("pointerup", async () => {
-            drawLogout(0x222222);
+        addButton(cornerX, cornerY, cornerW, cornerH, "LOGOUT", "18px", async () => {
             await signOut();
             scene.scene.restart();
-        });
+        }, 14);
+    } else if (isGuest) {
+        // Leaves Guest Mode for the normal sign-in flow. The guest save is
+        // kept as it is; signing in loads the account's own progression.
+        addButton(cornerX, cornerY, cornerW, cornerH, "SIGN IN", "18px", () => {
+            variable.identity = "account";
+            scene.scene.start("LoginScene");
+        }, 14);
     }
 
     // =================================================
     // LEVEL / XP PROGRESS (same progression logic as in-game, derived from
-    // the player's authoritative persistent XP — no gameplay/server needed)
+    // the player's persistent XP — no gameplay/server needed)
     // =================================================
 
     const barW = 320;
@@ -153,8 +176,10 @@ export function createHome(session) {
     const barX = width / 2 - barW / 2;
     const barY = height * 0.56;
 
-    if (isLoggedIn) {
-        const { level, intoLevel, span, progress } = getLevelProgress(session.xp);
+    const shownXP = isLoggedIn ? session.xp : isGuest ? guest.profile.xp : null;
+
+    if (shownXP != null) {
+        const { level, intoLevel, span, progress } = getLevelProgress(shownXP);
 
         const levelLabel = this.add.text(
             width / 2,
@@ -189,108 +214,98 @@ export function createHome(session) {
             }
         );
         xpLabel.setOrigin(0.5);
+
+        if (isGuest) {
+            const notes = {
+                unavailable: "This browser can't store data: guest progress will be lost when you close the page.",
+                recovered: "Your guest save couldn't be read, so a new one was started (the old data was kept as a backup).",
+            };
+            const guestNote = this.add.text(
+                width / 2,
+                barY + 50,
+                notes[guest.status] || "Guest progress is saved on this device only.",
+                {
+                    fontSize: "15px",
+                    fontFamily: "Ubuntu",
+                    align: "center",
+                    wordWrap: { width: Math.min(width - 48, 720) },
+                    color: guest.status in notes ? "#ffcc66" : "#999999"
+                }
+            );
+            guestNote.setOrigin(0.5);
+        }
     } else {
         const hint = this.add.text(
             width / 2,
             barY,
-            "Sign in to track your level and XP.",
+            "Sign in to save your level to your account, or play as a guest (saved on this device).",
             {
                 fontSize: "18px",
                 fontFamily: "Ubuntu",
-                color: "#999999"
+                color: "#999999",
+                align: "center",
+                wordWrap: { width: Math.min(width - 48, 720) }
             }
         );
         hint.setOrigin(0.5);
     }
 
     // =================================================
-    // PLAY / LOGIN BUTTON
+    // BUTTONS
     // =================================================
 
-    const btnW = isLoggedIn ? 200 : 250;
     const btnH = 70;
-    const btnX = width / 2 - btnW / 2;
     const btnY = height * 0.7;
-    const btnRadius = 20;
+    const btnGap = 24;
 
-    const btnBg = this.add.graphics();
+    if (isLoggedIn || isGuest) {
+        // Mode choice. PLAY is the existing main mode; FFA is the separate
+        // PvP room with temporary XP.
+        const playW = 200;
+        const ffaW = 300;
+        const rowX = width / 2 - (playW + btnGap + ffaW) / 2;
 
-    function drawButton(color) {
+        const start = (mode) => {
+            const identity = isGuest ? "guest" : "account";
+            const username = isGuest ? guest.profile.name : session.username;
+            const xp = isGuest ? guest.profile.xp : (session.xp || 0);
 
-        btnBg.clear();
+            variable.identity = identity;
+            variable.username = username;
+            variable.persistentXP = xp;
+            this.scene.start("Game", { mode, identity, username, xp });
+        };
 
-        btnBg.fillStyle(color, 0.95);
+        addButton(rowX, btnY, playW, btnH, "PLAY", "42px", () => start(GAME_MODES.MAIN));
+        addButton(rowX + playW + btnGap, btnY, ffaW, btnH, "FREE-FOR-ALL", "34px", () => start(GAME_MODES.FFA));
 
-        btnBg.fillRoundedRect(
-            btnX,
-            btnY,
-            btnW,
-            btnH,
-            btnRadius
+        const ffaHint = this.add.text(
+            width / 2,
+            btnY + btnH + 18,
+            "Free-for-All: fight other players. XP earned there lasts only for that run.",
+            {
+                fontSize: "15px",
+                fontFamily: "Ubuntu",
+                align: "center",
+                wordWrap: { width: Math.min(width - 48, 720) },
+                color: "#999999"
+            }
         );
+        ffaHint.setOrigin(0.5);
+    } else {
+        const loginW = 250;
+        const guestW = 330;
+        const rowX = width / 2 - (loginW + btnGap + guestW) / 2;
 
-        btnBg.lineStyle(3, 0xffffff, 1);
-
-        btnBg.strokeRoundedRect(
-            btnX,
-            btnY,
-            btnW,
-            btnH,
-            btnRadius
-        );
-    }
-
-    drawButton(0x222222);
-
-    const btnHit = this.add.rectangle(
-        btnX,
-        btnY,
-        btnW,
-        btnH,
-        0x000000,
-        0
-    );
-
-    btnHit
-        .setOrigin(0)
-        .setInteractive({ useHandCursor: true });
-
-    const btnText = this.add.text(
-        btnX + btnW / 2,
-        btnY + btnH / 2,
-        isLoggedIn ? "PLAY" : "LOGIN TO PLAY",
-        {
-            fontSize: isLoggedIn ?"42px" : "28px",
-            fontFamily: "Ubuntu",
-            color: "#ffffff"
-        }
-    );
-
-    btnText.setOrigin(0.5);
-
-    btnHit.on("pointerdown", () => {
-        drawButton(0x1a1a1a);
-    });
-
-    btnHit.on("pointerout", () => {
-        drawButton(0x222222);
-    });
-
-    btnHit.on("pointerup", () => {
-
-        drawButton(0x222222);
-
-        if (isLoggedIn) {
-            variable.username = session.username;
-            variable.persistentXP = session.xp || 0;
-            this.scene.start("Game", {
-                username: session.username,
-                xp: session.xp || 0
-            });
-        } else {
+        addButton(rowX, btnY, loginW, btnH, "LOGIN TO PLAY", "28px", () => {
             this.scene.start("LoginScene");
-        }
-    });
+        });
+
+        addButton(rowX + loginW + btnGap, btnY, guestW, btnH, "CONTINUE AS GUEST", "28px", () => {
+            variable.identity = "guest";
+            scene.scene.restart();
+        });
+    }
 }
 
 export async function loadHome() {

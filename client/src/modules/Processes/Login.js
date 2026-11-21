@@ -2,7 +2,8 @@ import {
     signInWithGoogle,
     getSession,
     claimUsername,
-    validateUsername
+    validateUsername,
+    signOut
 } from "../Multiplayer/FirebaseConfig.js";
 
 // =====================================================
@@ -245,6 +246,26 @@ export function createLogin() {
             "CONFIRM",
             () => {
                 submitUsername();
+            }
+        );
+
+        // Without this a half-finished sign-up was a dead end (Home sends a
+        // signed-in user with no username straight back here), which also
+        // locked a guest out of their local save.
+        createButton(
+            firstY + (btnH + btnGap) * 2,
+            "CANCEL",
+            async () => {
+                if (busy) {
+                    return;
+                }
+                busy = true;
+                try {
+                    await signOut();
+                } catch {
+                }
+                clearUi();
+                scene.scene.start("Home");
             }
         );
 

@@ -3,15 +3,23 @@ import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
-import { getEnemyStats, getPlayerStatsFromXP, rollEnemyRarity, sanitizeXP } from "../../../shared-data/Progression.js";
+import { getEnemyStats, getPlayerStatsFromXP, getLevelFromXP, rollEnemyRarity, sanitizeXP } from "../../../shared-data/Progression.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
-import { resetPlayerHealthTimers, tickPlayerRegen } from "./PlayerHealth.js";
+import { applyPlayerDamage, resetPlayerHealthTimers, tickPlayerRegen } from "./PlayerHealth.js";
+import { GAME_MODES, normalizeGameMode } from "../../../shared-data/GameModes.js";
 
 export class HeadlessGame {
 
-    constructor() {
+    // `mode` comes from the room type on the server (BattleRoom / FfaRoom),
+    // never from a client. Main mode: enemies, persistent XP, no PvP.
+    // FFA: no enemies, PvP on, progression from temporary ffaXP only, and
+    // nothing is ever queued for persistence.
+    constructor({ mode = GAME_MODES.MAIN } = {}) {
+        this.mode = normalizeGameMode(mode);
+        this.isFFA = this.mode === GAME_MODES.FFA;
+
         const fakeScene = {
             sys: {
                 scale: {
@@ -57,8 +65,21 @@ export class HeadlessGame {
         this.players = players;
     }
 
+    // The XP that sets this player's level/stats in this room's mode.
+    _progressXP(player) {
+        return this.isFFA ? (player.ffaXP || 0) : (player.xp || 0);
+    }
+
     applyRunStart(player) {
-        const stats = getPlayerStatsFromXP(player.xp || 0);
+        if (this.isFFA) {
+            // FFA progression is ffaXP alone. It survives this respawn; the
+            // persistent fields are pinned to 0 so nothing in FFA can bank,
+            // display or persist main-mode XP.
+            player.xp = 0;
+            player.ffaXP = sanitizeXP(player.ffaXP);
+        }
+
+        const stats = getPlayerStatsFromXP(this._progressXP(player));
 
         player.maxHealth = stats.maxHealth;
         player.health = stats.maxHealth;
@@ -74,6 +95,7 @@ export class HeadlessGame {
         player.fastfallDenied = false;
         player.slashCooldownRemaining = 0;
         player.runEnded = false;
+        player.lastPvpHit = null;
         resetPlayerHealthTimers(player);
     }
 
@@ -83,9 +105,18 @@ export class HeadlessGame {
             return;
         }
 
-        player.y = data.y;
+        // Positions feed hit detection (PvE and, in FFA, PvP), so a
+        // non-numeric/NaN/Infinite position is dropped rather than stored:
+        // NaN would make every range/arc comparison false and hit everyone.
+        const x = Number(data?.x);
+        const y = Number(data?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return;
+        }
+
+        player.y = y;
         this._applyFastfallRequest(sessionId, player, !!data.isFastFalling);
-        this._enforceSpawnBoundary(player, data.x);
+        this._enforceSpawnBoundary(player, x);
     }
 
     // The cooldown is an activation gate: a request made during cooldown never
@@ -152,11 +183,155 @@ export class HeadlessGame {
         player.slashDirY = dirY;
         player.slashSeq = (player.slashSeq || 0) + 1;
 
-        const stats = player._stats || getPlayerStatsFromXP(player.xp || 0);
+        const stats = player._stats || getPlayerStatsFromXP(this._progressXP(player));
         const deadIds = applySlashToEnemies(this.enemies, player.x, player.y, dirX, dirY, stats.damage);
 
         for (const id of deadIds) {
             this._killEnemy(id, player);
+        }
+
+        if (this.isFFA) {
+            this._slashPlayers(sessionId, player, dirX, dirY, stats.damage);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // PvP (FFA only). Same Slash arc/range and Fastfall radius/falloff that
+    // enemies are hit with, applied to other players. Every hit goes through
+    // applyPlayerDamage (resets the target's regen delay and records who hit
+    // them); kill credit is decided only in _endRun.
+    // ---------------------------------------------------------------
+    _slashPlayers(attackerId, attacker, dirX, dirY, damage) {
+        if (!Number.isFinite(attacker.x) || !Number.isFinite(attacker.y)) {
+            return;
+        }
+
+        const cosHalfArc = Math.cos((SETTINGS.PLAYER_SLASH_ARC / 2) * (Math.PI / 180));
+
+        for (const [targetId, target] of this.players) {
+            if (!this._canHitPlayer(attackerId, targetId, target)) {
+                continue;
+            }
+
+            const dx = target.x - attacker.x;
+            const dy = target.y - attacker.y;
+            const distance = Math.hypot(dx, dy);
+            if (!Number.isFinite(distance) || distance > SETTINGS.PLAYER_SLASH_RANGE || distance < 1e-6) {
+                continue;
+            }
+
+            if (!((dx / distance) * dirX + (dy / distance) * dirY >= cosHalfArc)) {
+                continue;
+            }
+
+            this._hitPlayer(attackerId, attacker, targetId, target, damage, SETTINGS.PLAYER_SLASH_KNOCKBACK);
+        }
+    }
+
+    _fastfallPlayers(attackerId, attacker, stats) {
+        const radius = stats.fastfallRadius;
+        if (!Number.isFinite(attacker.x) || !Number.isFinite(attacker.y)) {
+            return;
+        }
+
+        for (const [targetId, target] of this.players) {
+            if (!this._canHitPlayer(attackerId, targetId, target)) {
+                continue;
+            }
+
+            const distance = Math.hypot(target.x - attacker.x, target.y - attacker.y);
+            if (!(distance <= radius)) {
+                continue;
+            }
+
+            const falloff = getLinearFalloff(distance, radius);
+            this._hitPlayer(
+                attackerId,
+                attacker,
+                targetId,
+                target,
+                Math.round(stats.fastfallDamage * falloff),
+                stats.fastfallKnockback * falloff
+            );
+        }
+    }
+
+    // No self-hits, no hitting the dead, and the spawn zone stays a safe zone.
+    _canHitPlayer(attackerId, targetId, target) {
+        return targetId !== attackerId
+            && target.health > 0
+            && !target.runEnded
+            && target.spawnExited;
+    }
+
+    _hitPlayer(attackerId, attacker, targetId, target, damage, knockback) {
+        applyPlayerDamage(target, damage, { attackerId, atMs: this._simTimeMs });
+
+        if (knockback > 0) {
+            // Same client-side knockback message enemy hits already use.
+            this.pendingKnockbacks.push({
+                sessionId: targetId,
+                pusherX: attacker.x,
+                pusherY: attacker.y,
+                strength: knockback,
+            });
+        }
+
+        if (target.health <= 0) {
+            this._endRun(targetId, target);
+        }
+    }
+
+    // Called exactly once per victim death, from _endRun (guarded by runEnded).
+    _creditFFAKill(victimId, victim) {
+        const hit = victim.lastPvpHit;
+        victim.lastPvpHit = null;
+
+        if (!hit || hit.attackerId === victimId) {
+            return;
+        }
+
+        if (this._simTimeMs - hit.atMs > SETTINGS.FFA_KILL_CREDIT_WINDOW) {
+            return;
+        }
+
+        // Only a player still in this room can be credited; one who has left
+        // took their run (and its XP) with them.
+        const killer = this.players?.get(hit.attackerId);
+        if (!killer || killer.xpFrozen) {
+            return;
+        }
+
+        // Farming guard: repeatedly killing the same player (e.g. two of
+        // your own tabs trading kills) only pays once per cooldown.
+        const now = this._simTimeMs;
+        killer.recentVictims = killer.recentVictims || new Map();
+        for (const [id, at] of killer.recentVictims) {
+            if (now - at >= SETTINGS.FFA_REPEAT_KILL_COOLDOWN) {
+                killer.recentVictims.delete(id);
+            }
+        }
+        if (killer.recentVictims.has(victimId)) {
+            return;
+        }
+        killer.recentVictims.set(victimId, now);
+
+        // Scales with the victim's LEVEL (not their XP), so stronger players
+        // are worth more without rewards compounding: XP thresholds grow
+        // exponentially while this grows linearly with level.
+        const victimLevel = getLevelFromXP(victim.ffaXP || 0);
+        const reward = SETTINGS.FFA_KILL_XP_PER_VICTIM_LEVEL * victimLevel;
+        killer.ffaXP = sanitizeXP((killer.ffaXP || 0) + reward);
+
+        // Level up straight away (FFA XP is usable within the run). Max
+        // health rises by what the new level adds, without a free full heal;
+        // this is not damage, so the killer's regen timer is untouched.
+        const stats = getPlayerStatsFromXP(killer.ffaXP);
+        killer._stats = stats;
+        if (killer.health > 0 && !killer.runEnded) {
+            const gained = Math.max(0, stats.maxHealth - (killer.maxHealth || 0));
+            killer.maxHealth = stats.maxHealth;
+            killer.health = Math.min(killer.maxHealth, killer.health + gained);
         }
     }
 
@@ -213,13 +388,23 @@ export class HeadlessGame {
     // no separate dev-only XP/database mechanism to keep in sync.
     // ---------------------------------------------------------------
     _applyAuthoritativeXP(sessionId, player, xp) {
-        player.xp = sanitizeXP(xp);
+        if (this.isFFA) {
+            // In FFA the dev commands edit that run's temporary XP and are
+            // never persisted.
+            player.ffaXP = sanitizeXP(xp);
+        } else {
+            player.xp = sanitizeXP(xp);
+        }
 
-        const stats = getPlayerStatsFromXP(player.xp);
+        const stats = getPlayerStatsFromXP(this._progressXP(player));
         player._stats = stats;
         player.maxHealth = stats.maxHealth;
         if (player.health > 0) {
             player.health = stats.maxHealth;
+        }
+
+        if (this.isFFA) {
+            return;
         }
 
         // One controlled persistence operation per command, through the
@@ -236,8 +421,8 @@ export class HeadlessGame {
             return { ok: false, error: "Invalid amount." };
         }
 
-        this._applyAuthoritativeXP(sessionId, player, (player.xp || 0) + amount);
-        return { ok: true, xp: player.xp };
+        this._applyAuthoritativeXP(sessionId, player, this._progressXP(player) + amount);
+        return { ok: true, xp: this._progressXP(player) };
     }
 
     devSetXP(sessionId, amount) {
@@ -247,7 +432,7 @@ export class HeadlessGame {
         }
 
         this._applyAuthoritativeXP(sessionId, player, amount);
-        return { ok: true, xp: player.xp };
+        return { ok: true, xp: this._progressXP(player) };
     }
 
     // Returns the new state, or null if the target isn't currently connected.
@@ -315,6 +500,10 @@ export class HeadlessGame {
     // who's watching, so a zone left running for an hour alone behaves exactly
     // like the same hour with a player standing in it.
     _trySpawnEnemies(deltaMs) {
+        if (this.isFFA) {
+            return; // FFA is player-vs-player only.
+        }
+
         const dt = Math.max(0, deltaMs) / 1000;
 
         for (const zone of getCombatZones()) {
@@ -399,7 +588,7 @@ export class HeadlessGame {
             return;
         }
 
-        const stats = player._stats || getPlayerStatsFromXP(player.xp || 0);
+        const stats = player._stats || getPlayerStatsFromXP(this._progressXP(player));
         const radius = stats.fastfallRadius;
         const deadIds = [];
 
@@ -431,6 +620,19 @@ export class HeadlessGame {
         for (const id of deadIds) {
             this._killEnemy(id, player);
         }
+
+        if (this.isFFA) {
+            this._fastfallPlayers(this._sessionIdOf(player), player, stats);
+        }
+    }
+
+    _sessionIdOf(player) {
+        for (const [sessionId, p] of this.players) {
+            if (p === player) {
+                return sessionId;
+            }
+        }
+        return null;
     }
 
     _killEnemy(id, killer) {
@@ -442,7 +644,7 @@ export class HeadlessGame {
         // /togglefreezexp blocks *ordinary* XP income specifically — every
         // gameplay path that grants XP funnels through this one line, so
         // gating it here covers all of them, present and future.
-        if (killer && killer.health > 0 && !killer.xpFrozen) {
+        if (!this.isFFA && killer && killer.health > 0 && !killer.xpFrozen) {
             killer.runXP = (killer.runXP || 0) + (enemy.body.xp || 0);
         }
 
@@ -469,12 +671,20 @@ export class HeadlessGame {
 
         player.runEnded = true;
         player.health = 0;
-        player.xp = sanitizeXP((player.xp || 0) + (player.runXP || 0));
-        player.runXP = 0;
         // Synced death counter: each death is a distinct event for clients,
         // even if the respawn lands in the same state patch as the death.
         player.deathCount = (player.deathCount || 0) + 1;
         resetPlayerHealthTimers(player);
+
+        if (this.isFFA) {
+            // FFA: no banking and no persistence. The victim keeps their
+            // ffaXP through the respawn; the killer (if any) is credited once.
+            this._creditFFAKill(sessionId, player);
+            return;
+        }
+
+        player.xp = sanitizeXP((player.xp || 0) + (player.runXP || 0));
+        player.runXP = 0;
 
         this.pendingPersists.push({
             sessionId,

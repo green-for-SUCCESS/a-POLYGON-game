@@ -134,6 +134,12 @@ export function validateUsername(username) {
         return "Username must be 3-16 characters.";
     }
 
+    // Reserved for Guest Mode display names (Guest-xxxxxx), so an account
+    // can't be mistaken for a guest or the other way round.
+    if (/^guest[-_.]/i.test(username)) {
+        return "Usernames starting with \"Guest-\" are reserved for guests.";
+    }
+
     return null;
 }
 

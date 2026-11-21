@@ -4,9 +4,14 @@ import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
 import { sanitizeXP } from "../../../shared-data/Progression.js";
+import { GAME_MODES } from "../../../shared-data/GameModes.js";
 import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze } from "../firebaseAdmin.js";
 
 export class BattleRoom extends Room {
+
+    // The game mode is a property of the room TYPE (FfaRoom overrides it),
+    // fixed on the server. Nothing a client sends can change it.
+    static mode = GAME_MODES.MAIN;
 
     state = new BattleRoomState();
 
@@ -38,12 +43,17 @@ export class BattleRoom extends Room {
     }
 
     onCreate(options) {
-        // The world is an always-on simulation, not something that only exists
-        // while someone's connected: zones keep spawning/ticking with zero
-        // players, so don't let Colyseus tear the room down when it's empty.
-        this.autoDispose = false;
+        this.mode = this.constructor.mode;
+        this.state.mode = this.mode;
 
-        this.game = new HeadlessGame();
+        // The main world is an always-on simulation, not something that only
+        // exists while someone's connected: zones keep spawning/ticking with
+        // zero players, so don't let Colyseus tear the room down when it's
+        // empty. An FFA arena has nothing worth keeping once everyone has
+        // left (every run in it is over), so it is disposed as usual.
+        this.autoDispose = this.mode !== GAME_MODES.MAIN;
+
+        this.game = new HeadlessGame({ mode: this.mode });
         this.game.setPlayers(this.state.players);
         this._pendingDevAuthResults = [];
 
@@ -356,7 +366,16 @@ export class BattleRoom extends Room {
     }
 
     _dispatchPersists() {
-        for (const event of this.game.flushPersists()) {
+        const events = this.game.flushPersists();
+
+        // Only main mode has persistent progression. HeadlessGame never queues
+        // a persist in FFA; this is a second, independent guard so FFA XP can
+        // never reach a client's save path.
+        if (this.mode !== GAME_MODES.MAIN) {
+            return;
+        }
+
+        for (const event of events) {
             let client = null;
 
             for (const c of this.clients) {
@@ -377,7 +396,12 @@ export class BattleRoom extends Room {
     async onJoin(client, options) {
         const player = new PlayerState();
         player.name = sanitizePlayerName(options?.username || options?.name);
-        player.xp = sanitizeXP(options?.xp);
+        // Persistent XP only means something in main mode. FFA ignores any
+        // client-sent XP and every FFA run starts from ffaXP 0, so a fresh
+        // join (as opposed to a reconnect, which skips onJoin and keeps the
+        // same PlayerState) can never carry an old run's XP in.
+        player.xp = this.mode === GAME_MODES.MAIN ? sanitizeXP(options?.xp) : 0;
+        player.ffaXP = 0;
         this.game.applyRunStart(player);
         // Restore a durable /togglefreezexp setting for returning verified
         // accounts; anonymous/guest sessions simply start unfrozen (there's

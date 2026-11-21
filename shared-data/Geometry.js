@@ -68,16 +68,22 @@ export function getRegularPolygonSideForArea(area, sides) {
     return Math.sqrt((area * 4 * Math.tan(Math.PI / sides)) / sides);
 }
 
-const PLAYER_MIN_SIDES = 3;
+export const PLAYER_MIN_SIDES = 3;
+// Evolution stops here so high-level players stay recognisably polygons
+// instead of turning into circles. This caps the SHAPE only: levels, XP and
+// every level-based stat keep growing past it (see Progression.js).
+export const PLAYER_MAX_SIDES = 12;
 
-// Polygon evolution, with no upper limit. Each evolution takes 10 more levels
-// than the previous one: triangle -> square takes 15, square -> pentagon 25,
-// pentagon -> hexagon 35, and so on. Evolution k therefore costs 5 + 10k
-// levels, so a player with 3 + k sides has reached level
+// Polygon evolution. Each evolution takes 10 more levels than the previous
+// one: triangle -> square takes 15, square -> pentagon 25, pentagon ->
+// hexagon 35, and so on. Evolution k therefore costs 5 + 10k levels, so a
+// player with 3 + k sides has reached level
 //   1 + sum_{i=1..k} (5 + 10i) = 1 + 10k + 5k^2
 // (square at 16, pentagon at 41, hexagon at 76, heptagon at 121, octagon at
-// 176, ..., dodecagon at 496). This is the only place the thresholds live;
-// everything else derives the shape from the level through getPlayerSides.
+// 176, nonagon at 241, decagon at 316, hendecagon at 401, dodecagon at 496),
+// after which the side count stays at PLAYER_MAX_SIDES. This is the only
+// place the thresholds live; everything else derives the shape from the
+// level through getPlayerSides.
 export function getPlayerEvolutionLevel(sides) {
     const k = Math.max(0, Math.floor(sides) - PLAYER_MIN_SIDES);
     return 1 + 10 * k + 5 * k * k;
@@ -85,6 +91,9 @@ export function getPlayerEvolutionLevel(sides) {
 
 export function getPlayerSides(level) {
     const lvl = Number.isFinite(level) ? Math.max(1, Math.floor(level)) : 1;
+    if (lvl >= getPlayerEvolutionLevel(PLAYER_MAX_SIDES)) {
+        return PLAYER_MAX_SIDES;
+    }
 
     // Invert 1 + 10k + 5k^2 <= level, then correct for floating-point error
     // so the result always agrees exactly with getPlayerEvolutionLevel.
@@ -96,7 +105,7 @@ export function getPlayerSides(level) {
         k--;
     }
 
-    return PLAYER_MIN_SIDES + k;
+    return Math.min(PLAYER_MIN_SIDES + k, PLAYER_MAX_SIDES);
 }
 
 // The player's Level-1 triangle is defined to be IDENTICAL to the enemy

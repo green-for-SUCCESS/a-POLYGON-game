@@ -137,6 +137,20 @@ export const SETTINGS = {
     PLAYER_SLASH_KNOCKBACK: 800,
     PLAYER_SLASH_VISUAL_DURATION: 120, // ms, client-side placeholder visual only
 
+    // ---------------- FREE-FOR-ALL (PvP) ----------------
+    // Temporary FFA XP for defeating another player: this much per level of
+    // the victim (a level-1 victim gives 100 = one level-up for a new
+    // player). The victim keeps their own FFA XP. Based on level rather than
+    // a share of the victim's XP so kill rewards can't compound.
+    // FFA XP never touches persistent XP.
+    FFA_KILL_XP_PER_VICTIM_LEVEL: 100,
+    // Killing the same player again within this window pays nothing.
+    FFA_REPEAT_KILL_COOLDOWN: 30000, // ms
+    // A death that wasn't a direct lethal hit (e.g. pressing SUICIDE or
+    // touching spikes while losing a fight) still credits the last player
+    // who damaged the victim, if that hit was this recent.
+    FFA_KILL_CREDIT_WINDOW: 5000, // ms
+
     // ---------------- CHECKPOINT ----------------
     CHECKPOINT_SIZE: 32,
     CHECKPOINT_STORAGE_KEY: 'variable.lastCheckpoint',

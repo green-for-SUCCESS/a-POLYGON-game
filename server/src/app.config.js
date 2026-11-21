@@ -11,6 +11,8 @@ import {
  * Import your Room files
  */
 import { BattleRoom } from "./rooms/BattleRoom.js";
+import { FfaRoom } from "./rooms/FfaRoom.js";
+import { ROOM_NAMES, GAME_MODES } from "../../shared-data/GameModes.js";
 
 console.log(">>> APP CONFIG LOADED <<<");
 
@@ -19,7 +21,10 @@ const server = defineServer({
      * Define your room handlers:
      */
     rooms: {
-        battle: defineRoom(BattleRoom)
+        // Main mode (unchanged name, so existing clients keep working).
+        [ROOM_NAMES[GAME_MODES.MAIN]]: defineRoom(BattleRoom),
+        // Free-for-All PvP: a separate room type with its own sessions.
+        [ROOM_NAMES[GAME_MODES.FFA]]: defineRoom(FfaRoom),
     },
 
     /**

@@ -10,6 +10,7 @@ import { update } from "./Processes/Update.js";
 import { loadHome } from "./Processes/Home.js";
 import { createLogin } from "./Processes/Login.js";
 import { variable } from "./GameValues/LocalVariables.js";
+import { normalizeGameMode } from "../../../shared-data/GameModes.js";
 
 class LoginScene extends Phaser.Scene {
 
@@ -42,6 +43,13 @@ class GameScene extends Phaser.Scene {
     }
 
     create(data) {
+        variable.gameMode = normalizeGameMode(data?.mode);
+        variable.identity = data?.identity === "guest" ? "guest" : "account";
+        // Every game session starts a fresh run; FFA XP in particular never
+        // carries over from an earlier FFA session.
+        variable.ffaXP = 0;
+        variable.runXP = 0;
+
         if (data?.username) {
             variable.username = data.username;
         }

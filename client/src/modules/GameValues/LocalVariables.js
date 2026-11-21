@@ -49,6 +49,16 @@ export const variable = {
     fastfallBlocked: false,
     persistentXP: 0,
     runXP: 0,
+    // Which mode this game session plays ("main" | "ffa", see
+    // shared-data/GameModes.js). Requested from the Home screen, then
+    // replaced by the server's own room state once connected.
+    gameMode: "main",
+    // FFA only: this run's temporary XP, as synced by the server. Never
+    // copied into persistentXP and never saved anywhere.
+    ffaXP: 0,
+    // Where persistent progression lives for this session: "account"
+    // (Firebase) or "guest" (this browser's localStorage, GuestStore.js).
+    identity: "account",
     allBlocks: [],
     // Harmless in a normal build (never pushed to — the server only sends
     // dev-* messages to a client that presented a devToken). The dev
