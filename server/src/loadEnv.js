@@ -42,6 +42,15 @@ for (const name of candidates) {
     }
 }
 
+// Presence only, never values: says at a glance in the host's logs whether
+// the variables that change server behaviour are actually set there.
+const configured = (name) => (process.env[name] ? "yes" : "no");
+console.log(
+    `[env] NODE_ENV=${mode}; DEV_SECRET configured: ${configured("DEV_SECRET")}; ` +
+    `FIREBASE_SERVICE_ACCOUNT_JSON configured: ${configured("FIREBASE_SERVICE_ACCOUNT_JSON")}; ` +
+    `MONITOR_PASSWORD configured: ${configured("MONITOR_PASSWORD")}`
+);
+
 if (mode !== "production") {
     console.log(loadedFrom
         ? `[env] Loaded ${loadedFrom}`

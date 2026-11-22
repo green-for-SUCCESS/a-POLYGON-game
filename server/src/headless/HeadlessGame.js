@@ -13,9 +13,9 @@ import { GAME_MODES, normalizeGameMode } from "../../../shared-data/GameModes.js
 export class HeadlessGame {
 
     // `mode` comes from the room type on the server (BattleRoom / FfaRoom),
-    // never from a client. Main mode: enemies, persistent XP, no PvP.
-    // FFA: no enemies, PvP on, progression from temporary ffaXP only, and
-    // nothing is ever queued for persistence.
+    // never from a client. Both modes use the player's one persistent XP.
+    // Main mode: enemies, XP banked at death. FFA: no enemies, PvP on, and
+    // each server-credited kill is added to persistent XP and saved at once.
     constructor({ mode = GAME_MODES.MAIN } = {}) {
         this.mode = normalizeGameMode(mode);
         this.isFFA = this.mode === GAME_MODES.FFA;
@@ -36,6 +36,11 @@ export class HeadlessGame {
             // See PHYSICS_FPS: a fixed-step rate high enough that no body can
             // cross the ground's thickness within a single physics substep.
             fps: SETTINGS.PHYSICS_FPS,
+            // The only collisions here are explicit enemy-vs-ground collider
+            // pairs, which never query the dynamic R-tree. With the tree on,
+            // Phaser rebuilt it from every body on every substep (240/s) for
+            // nothing.
+            useTree: false,
         });
 
         this._simTimeMs = 0;
@@ -65,20 +70,24 @@ export class HeadlessGame {
         this.players = players;
     }
 
-    // The XP that sets this player's level/stats in this room's mode.
+    // The XP that sets this player's level/stats: their persistent XP, in
+    // every mode (main-mode run XP only counts once it is banked at death).
     _progressXP(player) {
-        return this.isFFA ? (player.ffaXP || 0) : (player.xp || 0);
+        return player.xp || 0;
+    }
+
+    // The one place persistent XP changes are queued for saving. BattleRoom
+    // gives each one a unique event id and sends it to the player's client,
+    // which applies it to Firestore (account) or localStorage (guest)
+    // idempotently. `kind` is "add" (amount is a delta) or "set" (/setxp).
+    _queueXPEvent(sessionId, kind, amount) {
+        if (!(amount > 0) && kind === "add") {
+            return;
+        }
+        this.pendingPersists.push({ sessionId, kind, amount: sanitizeXP(amount) });
     }
 
     applyRunStart(player) {
-        if (this.isFFA) {
-            // FFA progression is ffaXP alone. It survives this respawn; the
-            // persistent fields are pinned to 0 so nothing in FFA can bank,
-            // display or persist main-mode XP.
-            player.xp = 0;
-            player.ffaXP = sanitizeXP(player.ffaXP);
-        }
-
         const stats = getPlayerStatsFromXP(this._progressXP(player));
 
         player.maxHealth = stats.maxHealth;
@@ -295,8 +304,7 @@ export class HeadlessGame {
             return;
         }
 
-        // Only a player still in this room can be credited; one who has left
-        // took their run (and its XP) with them.
+        // Only a player still in this room can be credited.
         const killer = this.players?.get(hit.attackerId);
         if (!killer || killer.xpFrozen) {
             return;
@@ -318,15 +326,23 @@ export class HeadlessGame {
 
         // Scales with the victim's LEVEL (not their XP), so stronger players
         // are worth more without rewards compounding: XP thresholds grow
-        // exponentially while this grows linearly with level.
-        const victimLevel = getLevelFromXP(victim.ffaXP || 0);
+        // exponentially while this grows linearly with level. Capped at the
+        // killer's own level: a player's join XP comes from their client, so
+        // a victim claiming a huge level must not be able to pour persistent
+        // XP into someone else's account. (A killer inflating their own
+        // claim gains nothing here; their save only ever receives deltas.)
+        const victimLevel = Math.min(getLevelFromXP(victim.xp || 0), getLevelFromXP(killer.xp || 0));
         const reward = SETTINGS.FFA_KILL_XP_PER_VICTIM_LEVEL * victimLevel;
-        killer.ffaXP = sanitizeXP((killer.ffaXP || 0) + reward);
 
-        // Level up straight away (FFA XP is usable within the run). Max
-        // health rises by what the new level adds, without a free full heal;
-        // this is not damage, so the killer's regen timer is untouched.
-        const stats = getPlayerStatsFromXP(killer.ffaXP);
+        // Added to the killer's persistent XP and queued for saving right
+        // away, so it survives leaving FFA, a disconnect, or a later death.
+        killer.xp = sanitizeXP((killer.xp || 0) + reward);
+        this._queueXPEvent(hit.attackerId, "add", reward);
+
+        // Level up straight away. Max health rises by what the new level
+        // adds, without a free full heal; this is not damage, so the
+        // killer's regen timer is untouched.
+        const stats = getPlayerStatsFromXP(killer.xp);
         killer._stats = stats;
         if (killer.health > 0 && !killer.runEnded) {
             const gained = Math.max(0, stats.maxHealth - (killer.maxHealth || 0));
@@ -387,14 +403,8 @@ export class HeadlessGame {
     // recompute level/stats -> queue one pendingPersists entry), so there is
     // no separate dev-only XP/database mechanism to keep in sync.
     // ---------------------------------------------------------------
-    _applyAuthoritativeXP(sessionId, player, xp) {
-        if (this.isFFA) {
-            // In FFA the dev commands edit that run's temporary XP and are
-            // never persisted.
-            player.ffaXP = sanitizeXP(xp);
-        } else {
-            player.xp = sanitizeXP(xp);
-        }
+    _applyAuthoritativeXP(sessionId, player, xp, kind, amount) {
+        player.xp = sanitizeXP(xp);
 
         const stats = getPlayerStatsFromXP(this._progressXP(player));
         player._stats = stats;
@@ -403,14 +413,10 @@ export class HeadlessGame {
             player.health = stats.maxHealth;
         }
 
-        if (this.isFFA) {
-            return;
-        }
-
         // One controlled persistence operation per command, through the
-        // same queue/flush the rest of the game already uses — not a
-        // second ad hoc Firestore write path.
-        this.pendingPersists.push({ sessionId, xp: player.xp });
+        // same event queue the rest of the game uses — not a second ad hoc
+        // database write path.
+        this._queueXPEvent(sessionId, kind, amount);
     }
 
     // Deliberately bypasses xpFrozen: the freeze blocks *ordinary* gameplay
@@ -421,7 +427,14 @@ export class HeadlessGame {
             return { ok: false, error: "Invalid amount." };
         }
 
-        this._applyAuthoritativeXP(sessionId, player, this._progressXP(player) + amount);
+        const before = this._progressXP(player);
+        const after = sanitizeXP(before + amount);
+        if (after >= before) {
+            this._applyAuthoritativeXP(sessionId, player, after, "add", after - before);
+        } else {
+            // A negative /givexp lowers XP; saved as an explicit set.
+            this._applyAuthoritativeXP(sessionId, player, after, "set", after);
+        }
         return { ok: true, xp: this._progressXP(player) };
     }
 
@@ -431,7 +444,7 @@ export class HeadlessGame {
             return { ok: false, error: "Invalid amount." };
         }
 
-        this._applyAuthoritativeXP(sessionId, player, amount);
+        this._applyAuthoritativeXP(sessionId, player, amount, "set", sanitizeXP(amount));
         return { ok: true, xp: this._progressXP(player) };
     }
 
@@ -489,8 +502,16 @@ export class HeadlessGame {
         // substeps internally (Phaser's own accumulator, the same mechanism
         // the client's Scene already uses every frame), instead of doing one
         // big discrete AABB check that a fast body could skip clean over.
+        // Capped: Phaser runs deltaMs / (1000 / PHYSICS_FPS) substeps with no
+        // upper bound, so after a stall (CPU throttling, GC, a slow host) one
+        // huge delta made the next tick slower still, the next delta bigger,
+        // and so on until the event loop never got back to serving HTTP or
+        // WebSocket traffic. Past the cap the physics world simply runs a
+        // little behind real time for that tick instead.
         this._simTimeMs += deltaMs;
-        this.world.update(this._simTimeMs, deltaMs);
+        const physicsDelta = Math.min(Math.max(0, deltaMs), SETTINGS.MAX_PHYSICS_CATCHUP_MS);
+        this._physicsTimeMs = (this._physicsTimeMs || 0) + physicsDelta;
+        this.world.update(this._physicsTimeMs, physicsDelta);
         this._collectDeaths();
     }
 
@@ -648,6 +669,16 @@ export class HeadlessGame {
             killer.runXP = (killer.runXP || 0) + (enemy.body.xp || 0);
         }
 
+        // Remove the enemy's ground collider(s) too. disableBody alone left
+        // every killed enemy's Collider (and through it the body) in
+        // world.colliders forever: memory grew with every kill and each
+        // physics substep iterated all of them, so the server got steadily
+        // slower the longer people played until it stopped responding.
+        for (const collider of enemy.body.groundColliders || []) {
+            this.world.removeCollider(collider);
+        }
+        enemy.body.groundColliders = null;
+
         this.world.disableBody(enemy.body);
         this.enemies.delete(id);
     }
@@ -677,19 +708,16 @@ export class HeadlessGame {
         resetPlayerHealthTimers(player);
 
         if (this.isFFA) {
-            // FFA: no banking and no persistence. The victim keeps their
-            // ffaXP through the respawn; the killer (if any) is credited once.
+            // FFA: the victim keeps their XP (rewards were already saved as
+            // they were earned); the killer, if any, is credited once here.
             this._creditFFAKill(sessionId, player);
             return;
         }
 
-        player.xp = sanitizeXP((player.xp || 0) + (player.runXP || 0));
+        const banked = player.runXP || 0;
+        player.xp = sanitizeXP((player.xp || 0) + banked);
         player.runXP = 0;
-
-        this.pendingPersists.push({
-            sessionId,
-            xp: player.xp,
-        });
+        this._queueXPEvent(sessionId, "add", banked);
     }
 
     flushKnockbacks() {

@@ -53,9 +53,6 @@ export const variable = {
     // shared-data/GameModes.js). Requested from the Home screen, then
     // replaced by the server's own room state once connected.
     gameMode: "main",
-    // FFA only: this run's temporary XP, as synced by the server. Never
-    // copied into persistentXP and never saved anywhere.
-    ffaXP: 0,
     // Where persistent progression lives for this session: "account"
     // (Firebase) or "guest" (this browser's localStorage, GuestStore.js).
     identity: "account",

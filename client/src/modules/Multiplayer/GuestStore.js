@@ -9,11 +9,13 @@
 // unauthenticated connection (the same validation and gameplay rules apply).
 //
 // Only data that should survive a reload is stored: the guest id, the
-// display name and persistent main-mode XP. Level and polygon shape are
-// derived from XP. Temporary FFA XP, runtime/combat state, room objects and
-// developer tokens are never written here.
+// display name, persistent XP (earned in main mode and FFA alike) and the
+// ids of recently applied XP events (so a resent event never counts twice).
+// Level and polygon shape are derived from XP. Runtime/combat state, room
+// objects and developer tokens are never written here.
 
 import { sanitizeXP } from "../../../../shared-data/Progression.js";
+import { applyXPEvent } from "../../../../shared-data/XPEvents.js";
 
 const STORAGE_KEY = "apg.guestProfile";
 const CORRUPT_KEY_PREFIX = "apg.guestProfile.corrupt.";
@@ -53,6 +55,7 @@ function createProfile() {
         guestId,
         name: guestNameFor(guestId),
         xp: 0,
+        xpEventIds: [],
         createdAt: now,
         updatedAt: now,
     };
@@ -79,6 +82,9 @@ function normalizeProfile(raw) {
         guestId,
         name: guestNameFor(guestId),
         xp: sanitizeXP(raw.xp),
+        xpEventIds: Array.isArray(raw.xpEventIds)
+            ? raw.xpEventIds.filter((id) => typeof id === "string").slice(-200)
+            : [],
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
         updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : now,
     };
@@ -159,6 +165,7 @@ export function loadGuestProfile() {
 
     const repaired = parsed.guestId !== profile.guestId
         || parsed.xp !== profile.xp
+        || (parsed.xpEventIds !== undefined && !Array.isArray(parsed.xpEventIds))
         || parsed.name !== profile.name
         || parsed.version !== profile.version;
     if (repaired) {
@@ -168,17 +175,31 @@ export function loadGuestProfile() {
     return { profile, status: repaired ? "repaired" : "loaded" };
 }
 
-// Saves the guest's persistent main-mode XP (the authoritative total the
-// server sends after each death). Never called for FFA or signed-in players.
-export function saveGuestXP(xp) {
-    const amount = sanitizeXP(xp);
+// Applies one persistent-XP event from the server (main-mode XP banked at
+// death, an FFA kill reward, a dev command) to the guest save. Same rules as
+// the account path (shared-data/XPEvents.js): "add" increments what is
+// stored now, and an event id already recorded is skipped, so a resent or
+// duplicated event never counts twice. Returns true once the event is in the
+// save (or already was). Never touches Firebase.
+export function applyGuestXPEvent(event) {
     const storage = getStorage();
 
     if (!storage) {
-        memoryProfile = { ...(memoryProfile || createProfile()), xp: amount, updatedAt: Date.now() };
-        return false;
+        const base = memoryProfile || createProfile();
+        const result = applyXPEvent(base, event);
+        memoryProfile = { ...base, xp: result.xp, xpEventIds: result.xpEventIds, updatedAt: Date.now() };
+        return true;
     }
 
     const { profile } = loadGuestProfile();
-    return writeProfile(storage, { ...profile, xp: amount, updatedAt: Date.now() });
+    const result = applyXPEvent(profile, event);
+    if (!result.applied) {
+        return true; // already applied earlier
+    }
+    return writeProfile(storage, {
+        ...profile,
+        xp: result.xp,
+        xpEventIds: result.xpEventIds,
+        updatedAt: Date.now(),
+    });
 }

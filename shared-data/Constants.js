@@ -15,6 +15,10 @@ export const SETTINGS = {
     // small regardless of velocity. Used by both the headless World and the
     // client's Phaser game config (see Game.js), so both agree.
     PHYSICS_FPS: 240,
+    // Server only: the most simulated time one tick may catch up on (see
+    // HeadlessGame.update). Normal ticks are ~16.7ms; this only matters
+    // after a stall, where it stops a slow tick from snowballing.
+    MAX_PHYSICS_CATCHUP_MS: 100,
 
     // ---------------- ENTITIES ----------------
     ENTITY_SPAWN_HEIGHT: 1800,
@@ -138,11 +142,10 @@ export const SETTINGS = {
     PLAYER_SLASH_VISUAL_DURATION: 120, // ms, client-side placeholder visual only
 
     // ---------------- FREE-FOR-ALL (PvP) ----------------
-    // Temporary FFA XP for defeating another player: this much per level of
-    // the victim (a level-1 victim gives 100 = one level-up for a new
-    // player). The victim keeps their own FFA XP. Based on level rather than
-    // a share of the victim's XP so kill rewards can't compound.
-    // FFA XP never touches persistent XP.
+    // XP for defeating another player in FFA, added to the killer's
+    // persistent XP: this much per level of the victim (a level-1 victim
+    // gives 100). The victim keeps their XP. Based on level rather than a
+    // share of the victim's XP so rewards can't compound.
     FFA_KILL_XP_PER_VICTIM_LEVEL: 100,
     // Killing the same player again within this window pays nothing.
     FFA_REPEAT_KILL_COOLDOWN: 30000, // ms

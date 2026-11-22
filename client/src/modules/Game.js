@@ -45,9 +45,7 @@ class GameScene extends Phaser.Scene {
     create(data) {
         variable.gameMode = normalizeGameMode(data?.mode);
         variable.identity = data?.identity === "guest" ? "guest" : "account";
-        // Every game session starts a fresh run; FFA XP in particular never
-        // carries over from an earlier FFA session.
-        variable.ffaXP = 0;
+        // Every game session starts a fresh run.
         variable.runXP = 0;
 
         if (data?.username) {

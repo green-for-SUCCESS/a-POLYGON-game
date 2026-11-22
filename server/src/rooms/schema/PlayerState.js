@@ -14,11 +14,6 @@ export const PlayerState = schema({
     name: { type: "string", default: "Player" },
     xp: { type: "number", default: 0 },
     runXP: { type: "number", default: 0 },
-    // Free-for-All only: this FFA run's temporary XP. Kept through deaths and
-    // respawns in the same FFA room, gone when the player leaves it. Never
-    // persisted and never added to xp. Always 0 in main mode (and xp/runXP
-    // are always 0 in FFA).
-    ffaXP: { type: "number", default: 0 },
     spawnExited: { type: "boolean", default: false },
     slashDirX: { type: "number", default: 0 },
     slashDirY: { type: "number", default: 0 },

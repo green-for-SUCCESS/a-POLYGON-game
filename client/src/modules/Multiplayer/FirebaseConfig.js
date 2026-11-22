@@ -15,11 +15,11 @@ import {
     getFirestore,
     doc,
     getDoc,
-    setDoc,
     runTransaction,
     serverTimestamp
 } from "firebase/firestore";
 import { sanitizeXP } from "../../../../shared-data/Progression.js";
+import { applyXPEvent } from "../../../../shared-data/XPEvents.js";
 
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -180,16 +180,43 @@ export async function claimUsername(uid, username) {
     return username;
 }
 
-export async function persistXP(xp) {
+// Applies one persistent-XP event (shared-data/XPEvents.js) to the signed-in
+// user's doc inside a Firestore transaction: read the stored xp and the ids
+// of recently applied events, apply, write both back. "add" therefore acts
+// as an atomic increment (a delayed or retried save can never overwrite a
+// newer total), and an event id that is already recorded is skipped, so a
+// retry or a resend never counts twice.
+export async function applyXPEventToAccount(uid, event) {
     const user = await waitForAuth();
-    if (!user) {
-        return;
+    if (!user || user.uid !== uid) {
+        // Never write one account's XP into whoever happens to be signed in.
+        const error = new Error("The signed-in account changed.");
+        error.code = "account-changed";
+        throw error;
     }
 
     const { db: firestore } = getFirebase();
-    await setDoc(
-        doc(firestore, "users", user.uid),
-        { xp: sanitizeXP(xp) },
-        { merge: true }
-    );
+    const ref = doc(firestore, "users", uid);
+
+    try {
+        return await runTransaction(firestore, async (transaction) => {
+            const snap = await transaction.get(ref);
+            const result = applyXPEvent(snap.exists() ? snap.data() : {}, event);
+            if (result.applied) {
+                // xp and the applied-event ids are always written together:
+                // saving xp without the id would let the same event be
+                // applied again (by a retry, another tab, or the server).
+                transaction.set(ref, { xp: result.xp, xpEventIds: result.xpEventIds }, { merge: true });
+            }
+            return result;
+        });
+    } catch (error) {
+        if (error?.code === "permission-denied") {
+            console.error(
+                "❌ Firestore rules rejected the XP save. users/{uid} must allow the owner to write the " +
+                "`xp` and `xpEventIds` fields. The XP stays queued and is retried."
+            );
+        }
+        throw error;
+    }
 }

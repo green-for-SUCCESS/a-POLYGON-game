@@ -15,6 +15,7 @@ import { variable } from "../GameValues/LocalVariables.js";
 //   choose   - signed out: pick LOGIN or CONTINUE AS GUEST.
 // Account and guest progression are never mixed; signing in while a guest
 // save exists just loads the account and leaves the guest save untouched.
+// Both game modes (PLAY and FREE-FOR-ALL) use and add to that progression.
 
 export function createHome(session) {
 
@@ -260,7 +261,7 @@ export function createHome(session) {
 
     if (isLoggedIn || isGuest) {
         // Mode choice. PLAY is the existing main mode; FFA is the separate
-        // PvP room with temporary XP.
+        // PvP room; XP earned there is added to the same progression.
         const playW = 200;
         const ffaW = 300;
         const rowX = width / 2 - (playW + btnGap + ffaW) / 2;
@@ -282,7 +283,7 @@ export function createHome(session) {
         const ffaHint = this.add.text(
             width / 2,
             btnY + btnH + 18,
-            "Free-for-All: fight other players. XP earned there lasts only for that run.",
+            "Free-for-All: fight other players. XP you earn there is added to your level.",
             {
                 fontSize: "15px",
                 fontFamily: "Ubuntu",

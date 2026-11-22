@@ -1,5 +1,4 @@
 import { SETTINGS } from "./Constants.js";
-import { GAME_MODES } from "./GameModes.js";
 
 export function rollEnemyRarity(
     maxRarity = SETTINGS.ENEMY_RARITY_MAX,
@@ -115,21 +114,12 @@ export function getLevelProgress(xp) {
     return { level, xp: amount, intoLevel, span, progress };
 }
 
-// The XP that drives a player's level in a given game mode. Main mode uses
-// the persistent account/guest XP plus the current run's unbanked XP. FFA
-// uses only that FFA run's temporary XP (ffaXP), so a FFA run never reads or
-// changes persistent progression, and persistent XP never boosts FFA.
-export function getPlayerProgressXP(state, mode = GAME_MODES.MAIN) {
-    if (mode === GAME_MODES.FFA) {
-        return sanitizeXP(state?.ffaXP);
-    }
-    return getRunXPTotal(state?.xp, state?.runXP);
-}
-
-// The one place that turns a player's authoritative state into their current
-// level, so the HUD, polygon shape, etc. never compute it differently.
-export function getPlayerLevelFromState(state, mode = GAME_MODES.MAIN) {
-    return getLevelFromXP(getPlayerProgressXP(state, mode));
+// The one place that turns a player's authoritative state (persistent xp
+// plus any unbanked main-mode run XP) into their current level, so the HUD,
+// polygon shape, etc. never compute it differently. The same in every mode:
+// FFA uses the player's persistent progression too.
+export function getPlayerLevelFromState(state) {
+    return getLevelFromXP(getRunXPTotal(state?.xp, state?.runXP));
 }
 
 export function getPlayerStats(level) {

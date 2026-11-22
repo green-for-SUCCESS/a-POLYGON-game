@@ -179,6 +179,50 @@ export async function unbanUsername(username) {
     }
 }
 
+// Applies persistent-XP events to users/{uid} the same way the client does
+// (shared-data/XPEvents.js), inside one Firestore transaction. Used only as a
+// fallback when a verified player leaves before their client confirmed the
+// save. Idempotent: events the client already applied are skipped by id.
+export async function applyXPEventsForUid(uid, events) {
+    if (!uid || !events?.length) {
+        return { ok: true, applied: 0 };
+    }
+
+    const ready = await ensureInit();
+    if (!ready) {
+        return { ok: false, error: "Firebase Admin is not configured." };
+    }
+
+    try {
+        const { applyXPEvent } = await import("../../shared-data/XPEvents.js");
+        const ref = admin.firestore().collection("users").doc(uid);
+        let applied = 0;
+
+        await admin.firestore().runTransaction(async (transaction) => {
+            const snap = await transaction.get(ref);
+            if (!snap.exists) {
+                throw new Error("No user profile document.");
+            }
+            let record = snap.data() || {};
+            applied = 0;
+            for (const event of events) {
+                const result = applyXPEvent(record, event);
+                if (result.applied) {
+                    applied++;
+                    record = { ...record, xp: result.xp, xpEventIds: result.xpEventIds };
+                }
+            }
+            if (applied > 0) {
+                transaction.set(ref, { xp: record.xp, xpEventIds: record.xpEventIds }, { merge: true });
+            }
+        });
+
+        return { ok: true, applied };
+    } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+    }
+}
+
 // XP-freeze is stored per-uid so it survives a reconnect or server restart,
 // the same way bans do — reuses the exact same Admin/Firestore plumbing
 // rather than inventing a second persistence path.

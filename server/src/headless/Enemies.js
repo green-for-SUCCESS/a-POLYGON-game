@@ -51,8 +51,10 @@ export function createEnemy(world, { x, rarity, stats }) {
     enemy.moveIntent = 0;
     enemy.moveForceScale = SETTINGS.ENEMY_PATROL_FORCE_SCALE;
 
+    // Kept so HeadlessGame._killEnemy can remove them with the enemy.
+    enemy.groundColliders = [];
     for (const ground of world.staticBodies) {
-        world.addCollider(enemy, ground);
+        enemy.groundColliders.push(world.addCollider(enemy, ground));
     }
 
     return enemy;

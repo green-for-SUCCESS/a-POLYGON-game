@@ -5,7 +5,14 @@ import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
 import { sanitizeXP } from "../../../shared-data/Progression.js";
 import { GAME_MODES } from "../../../shared-data/GameModes.js";
-import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze } from "../firebaseAdmin.js";
+import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze, applyXPEventsForUid, isFirebaseAdminConfigured } from "../firebaseAdmin.js";
+
+// Unacknowledged XP events are re-sent this often (a client that missed one
+// because of a dropped message or a failed save gets another chance; the
+// event id makes a duplicate harmless).
+const XP_EVENT_RESEND_MS = 10000;
+// Per-player cap, so a client that never acknowledges can't grow this forever.
+const MAX_UNACKED_XP_EVENTS = 200;
 
 export class BattleRoom extends Room {
 
@@ -42,6 +49,19 @@ export class BattleRoom extends Room {
         return { uid: decoded.uid };
     }
 
+    // Defining this makes Colyseus wrap the simulation tick, every message
+    // handler, clock timers and the lifecycle hooks in try/catch. Without
+    // it, one exception in any of them (a malformed client message was
+    // enough) escaped to Node and killed the whole process, disconnecting
+    // every player until the host restarted it.
+    onUncaughtException(error, methodName) {
+        // Colyseus wraps the original error; its `cause` has the real stack.
+        console.error(
+            `[room ${this.roomId} mode=${this.mode}] Uncaught error in ${methodName}:`,
+            error?.cause?.stack || error?.stack || error
+        );
+    }
+
     onCreate(options) {
         this.mode = this.constructor.mode;
         this.state.mode = this.mode;
@@ -73,6 +93,21 @@ export class BattleRoom extends Room {
             this.game.applyPlayerSlash(client.sessionId, data);
         });
 
+        // The client confirms each XP event once its save provider has
+        // applied it (or already had it).
+        this.onMessage("persistAck", (client, data) => {
+            const player = this.state.players.get(client.sessionId);
+            const eventId = typeof data?.eventId === "string" ? data.eventId : null;
+            if (player?._unackedXP && eventId) {
+                player._unackedXP.delete(eventId);
+            }
+        });
+
+        this._xpEventSeq = 0;
+        this._lastXPResendAt = 0;
+        // Server-side XP saves started by onLeave that haven't finished yet.
+        this._pendingXPSaves = new Set();
+
         this._registerDevMessages();
 
         this.setSimulationInterval((deltaTime) => {
@@ -81,6 +116,7 @@ export class BattleRoom extends Room {
             this._dispatchKnockbacks();
             this._dispatchFastfallDenials();
             this._dispatchPersists();
+            this._resendUnackedXP();
             this._dispatchDevAuthResults();
         });
     }
@@ -365,43 +401,82 @@ export class BattleRoom extends Room {
         }
     }
 
+    // Every persistent-XP change becomes an event with an id that is unique
+    // to this room instance (roomIds are random, so ids never repeat across
+    // rooms or server restarts). The player's client applies it to its save
+    // provider idempotently and acknowledges it; until then it is kept here
+    // and re-sent. See shared-data/XPEvents.js.
     _dispatchPersists() {
-        const events = this.game.flushPersists();
-
-        // Only main mode has persistent progression. HeadlessGame never queues
-        // a persist in FFA; this is a second, independent guard so FFA XP can
-        // never reach a client's save path.
-        if (this.mode !== GAME_MODES.MAIN) {
-            return;
-        }
-
-        for (const event of events) {
-            let client = null;
-
-            for (const c of this.clients) {
-                if (c.sessionId === event.sessionId) {
-                    client = c;
-                    break;
-                }
-            }
-
-            if (!client) {
+        for (const pending of this.game.flushPersists()) {
+            const player = this.state.players.get(pending.sessionId);
+            if (!player) {
                 continue;
             }
 
-            client.send("persistXP", { xp: event.xp });
+            const event = {
+                eventId: `${this.roomId}:${pending.sessionId}:${++this._xpEventSeq}`,
+                kind: pending.kind,
+                amount: pending.amount,
+            };
+
+            player._unackedXP = player._unackedXP || new Map();
+            player._unackedXP.set(event.eventId, { event, sentAt: Date.now() });
+            if (player._unackedXP.size > MAX_UNACKED_XP_EVENTS) {
+                const oldest = player._unackedXP.keys().next().value;
+                player._unackedXP.delete(oldest);
+                console.warn(`[room ${this.roomId}] ${pending.sessionId} is not acknowledging XP events; dropped the oldest.`);
+            }
+
+            this._sendXPEvent(pending.sessionId, player, event);
+        }
+    }
+
+    _sendXPEvent(sessionId, player, event) {
+        const client = this.clients.find((c) => c.sessionId === sessionId);
+        // `xp` is the server's resulting total, for display only; providers
+        // apply `kind`/`amount`, never overwrite with it.
+        client?.send("persistXP", { ...event, xp: player.xp });
+    }
+
+    _resendUnackedXP(force = false) {
+        const now = Date.now();
+        if (!force && now - this._lastXPResendAt < XP_EVENT_RESEND_MS) {
+            return;
+        }
+        this._lastXPResendAt = now;
+
+        for (const [sessionId, player] of this.state.players) {
+            if (!player._unackedXP?.size) {
+                continue;
+            }
+            for (const entry of player._unackedXP.values()) {
+                if (force || now - entry.sentAt >= XP_EVENT_RESEND_MS) {
+                    entry.sentAt = now;
+                    this._sendXPEvent(sessionId, player, entry.event);
+                }
+            }
+        }
+    }
+
+    // A reconnecting client may have missed events while it was away.
+    onReconnect(client) {
+        const player = this.state.players.get(client.sessionId);
+        if (!player?._unackedXP?.size) {
+            return;
+        }
+        for (const entry of player._unackedXP.values()) {
+            entry.sentAt = Date.now();
+            this._sendXPEvent(client.sessionId, player, entry.event);
         }
     }
 
     async onJoin(client, options) {
         const player = new PlayerState();
         player.name = sanitizePlayerName(options?.username || options?.name);
-        // Persistent XP only means something in main mode. FFA ignores any
-        // client-sent XP and every FFA run starts from ffaXP 0, so a fresh
-        // join (as opposed to a reconnect, which skips onJoin and keeps the
-        // same PlayerState) can never carry an old run's XP in.
-        player.xp = this.mode === GAME_MODES.MAIN ? sanitizeXP(options?.xp) : 0;
-        player.ffaXP = 0;
+        // The player's persistent XP, loaded by their client from their save
+        // provider (Firestore account or local guest save), in every mode:
+        // FFA keeps the player's level and adds to it.
+        player.xp = sanitizeXP(options?.xp);
         this.game.applyRunStart(player);
         // Restore a durable /togglefreezexp setting for returning verified
         // accounts; anonymous/guest sessions simply start unfrozen (there's
@@ -447,9 +522,8 @@ export class BattleRoom extends Room {
             });
         }
 
-        console.log("Players in room:", this.state.players);
-        console.log("Player added:", client.sessionId);
-        console.log(client.sessionId, "joined!");
+        // (Used to dump the whole players map on every join.)
+        console.log(`[room ${this.roomId} mode=${this.mode}] ${client.sessionId} joined (${this.state.players.size} players).`);
     }
 
     // This is the actual root cause of "a brief internet drop kills the
@@ -479,11 +553,55 @@ export class BattleRoom extends Room {
     // "Main Menu" button, which calls room.leave() -> CloseCode.CONSENTED),
     // or onDrop()'s reconnection window above expired/failed.
     onLeave(client) {
+        const player = this.state.players.get(client.sessionId);
+        const unacked = player?._unackedXP?.size
+            ? [...player._unackedXP.values()].map((entry) => entry.event)
+            : [];
         this.state.players.delete(client.sessionId);
+
+        if (unacked.length === 0) {
+            return;
+        }
+
+        // The client left before confirming these were saved. For a verified
+        // account the server can save them itself (same idempotent events, so
+        // it doesn't matter if the client also got them through). A guest's
+        // save lives only in their browser, so there is nothing more the
+        // server can do; say so instead of silently losing it.
+        const uid = client.auth?.uid;
+        if (uid && isFirebaseAdminConfigured()) {
+            // Tracked so onDispose (which Colyseus awaits during a graceful
+            // shutdown, e.g. on redeploy) can wait for it; onLeave's own
+            // promise is not awaited on that path when several players leave.
+            const save = applyXPEventsForUid(uid, unacked).then((result) => {
+                if (!result.ok) {
+                    console.error(`[room ${this.roomId}] Could not save ${unacked.length} unconfirmed XP event(s) for uid ${uid}: ${result.error}`);
+                }
+            });
+            this._pendingXPSaves.add(save);
+            save.finally(() => this._pendingXPSaves.delete(save));
+            return save;
+        } else {
+            console.warn(
+                `[room ${this.roomId}] ${client.sessionId} left with ${unacked.length} XP event(s) not confirmed as saved` +
+                (uid ? " (Firebase Admin is not configured, so the server can't save them)." : " (guest or unverified player).")
+            );
+        }
     }
 
     onDispose() {
         console.log("room", this.roomId, "disposing...");
+
+        if (!this._pendingXPSaves?.size) {
+            return;
+        }
+        // Let in-flight server-side XP saves finish before the room (and,
+        // on shutdown, the process) goes away. Bounded so a hung Firestore
+        // call can't block shutdown forever.
+        return Promise.race([
+            Promise.allSettled([...this._pendingXPSaves]),
+            new Promise((resolve) => setTimeout(resolve, 10000)),
+        ]);
     }
 }
 

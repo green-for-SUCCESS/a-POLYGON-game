@@ -95,7 +95,7 @@ export function applyPlayerPolygon(player, level) {
 
 export function createPlayer(id, x, y, playerState) {
     const isLocal = (id === variable.playerId);
-    const level = getPlayerLevelFromState(playerState, variable.gameMode);
+    const level = getPlayerLevelFromState(playerState);
     const sides = getPlayerSides(level);
 
     const sprite = variable.sceneRef.physics.add.sprite(
@@ -234,11 +234,9 @@ export function updateProgressHud() {
         return;
     }
 
-    // FFA shows that run's temporary progression; main mode the persistent one.
+    // The player's persistent progression in every mode (FFA adds to it).
     const isFFA = variable.gameMode === GAME_MODES.FFA;
-    const total = isFFA
-        ? variable.ffaXP
-        : getRunXPTotal(variable.persistentXP, variable.runXP);
+    const total = getRunXPTotal(variable.persistentXP, variable.runXP);
     const { level, intoLevel, span } = getLevelProgress(total);
     const prefix = isFFA ? "FFA " : "";
     variable.xpHud.setText(`${prefix}Lv ${level}  ${Math.floor(intoLevel)}/${Math.floor(span)} XP`);

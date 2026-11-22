@@ -4,12 +4,13 @@ import { Callbacks, CloseCode } from "@colyseus/sdk";
 import { variable } from "../GameValues/LocalVariables.js";
 
 import { createPlayer, applyPlayerPolygon, handleLocalPlayerDeath, playPlayerDeathAnimation, respawnPlayer, updateHealthBar, updateProgressHud, setRemotePlayerName, setRemotePlayerHealth, killRemotePlayer, reviveRemotePlayer, destroyPlayer } from "../Entities/Players.js";
-import { getSession, persistXP } from "./FirebaseConfig.js";
+import { waitForAuth, getUserProfile } from "./FirebaseConfig.js";
+import { submitXPEvent, flushAccountXP } from "./XPSync.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
 import { getPlayerLevelFromState, sanitizeXP } from "../../../../shared-data/Progression.js";
-import { GAME_MODES, ROOM_NAMES, normalizeGameMode } from "../../../../shared-data/GameModes.js";
-import { loadGuestProfile, saveGuestXP } from "./GuestStore.js";
+import { ROOM_NAMES, normalizeGameMode } from "../../../../shared-data/GameModes.js";
+import { loadGuestProfile } from "./GuestStore.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
 import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
@@ -28,6 +29,60 @@ export const client = new Colyseus.Client(SERVER_URL);
 let connecting = false;
 const MAX_AUTO_RETRIES = 5;
 const SLOW_CONNECT_MS = 15000;
+// Past this, an unanswered join counts as a failed attempt instead of
+// waiting forever. A Render instance that is waking up answers well within
+// it; one that is wedged or down never does.
+const JOIN_TIMEOUT_MS = 30000;
+// Bumped whenever an attempt is abandoned (timed out). A join that resolves
+// after being abandoned is left immediately, so a timeout can never leave a
+// second, ghost session behind.
+let attemptGeneration = 0;
+
+class JoinTimeoutError extends Error {
+    constructor() {
+        super(`No answer from the server within ${JOIN_TIMEOUT_MS / 1000}s.`);
+        this.name = "JoinTimeoutError";
+    }
+}
+
+// Turns a failed connection attempt into a message that says WHICH stage
+// failed. Never includes tokens or secrets.
+function describeConnectError(e) {
+    const message = String(e?.message || e || "");
+    const code = typeof e?.code === "number" ? e.code : null;
+
+    if (e instanceof JoinTimeoutError) {
+        return "The server isn't responding (it may be starting up, overloaded or down).";
+    }
+    if (e?.name === "StaleJoinError") {
+        return "Discarded an outdated connection; reconnecting with the current session.";
+    }
+    if (/not defined/i.test(message)) {
+        return "The server doesn't offer this game mode (it may be running an older version).";
+    }
+    if (code === 403 || /banned/i.test(message)) {
+        return `The server refused the connection: ${message}`;
+    }
+    if (code === 401 || /auth/i.test(message)) {
+        return "The server rejected this login. Try signing in again.";
+    }
+    if (code === 4010) {
+        return "The connection dropped while joining (your network may have gone offline).";
+    }
+    if (code === 4001) {
+        return "The server is restarting. It should be back shortly.";
+    }
+    if (code != null && code >= 4000 && code < 5000) {
+        return `The server couldn't set up the game room (code ${code}): ${message}`;
+    }
+    if (code != null && code >= 1000 && code < 4000) {
+        return `The connection to the server closed during setup (WebSocket code ${code}).`;
+    }
+    if (e instanceof TypeError || /fetch|network|ERR_/i.test(message)) {
+        return "Couldn't reach the server (offline, DNS failure, or the server refused the connection).";
+    }
+    return `Couldn't connect to the server: ${message || "unknown error"}`;
+}
 
 export async function connect() {
     if (connecting) {
@@ -64,22 +119,36 @@ async function connectWithRetry() {
             }
         }, SLOW_CONNECT_MS);
 
+        const generation = ++attemptGeneration;
+        let joinTimer = null;
+
         try {
-            const room = await attemptConnect();
+            const room = await Promise.race([
+                attemptConnect(generation),
+                new Promise((_, reject) => {
+                    joinTimer = setTimeout(() => reject(new JoinTimeoutError()), JOIN_TIMEOUT_MS);
+                }),
+            ]);
             hideConnectionStatus();
             return room;
         } catch (e) {
-            attempt++;
-            console.error(`❌ Connection attempt ${attempt} failed:`, e);
+            if (e instanceof JoinTimeoutError) {
+                // Abandon it: if it ever completes, attemptConnect sees the
+                // newer generation and leaves that room straight away.
+                attemptGeneration++;
+            }
 
-            // A network failure is not an auth failure — say which server it was.
+            attempt++;
+            const reason = describeConnectError(e);
+            console.error(`❌ Connection attempt ${attempt} failed: ${reason}`, e);
+
             if (import.meta.env.MODE !== "production" && isDevBuild()) {
-                variable.devLog.push(`✗ Unable to connect to the Colyseus server at ${SERVER_URL} (attempt ${attempt}). Is it running?`);
+                variable.devLog.push(`✗ Attempt ${attempt} to ${SERVER_URL} failed: ${reason}`);
             }
 
             if (attempt >= MAX_AUTO_RETRIES) {
                 await new Promise((resolve) => {
-                    showConnectionStatus("Couldn't reach the server. Click to retry.", "error", () => {
+                    showConnectionStatus(`${reason} Click to retry.`, "error", () => {
                         attempt = 0;
                         resolve();
                     });
@@ -88,18 +157,20 @@ async function connectWithRetry() {
             }
 
             const delaySeconds = Math.min(10, 2 ** (attempt - 1));
-            showConnectionStatus(`Connecting to the server… retrying in ${delaySeconds}s`, "warn");
+            showConnectionStatus(`${reason} Retrying in ${delaySeconds}s…`, "warn");
             await new Promise((r) => setTimeout(r, delaySeconds * 1000));
         } finally {
             clearTimeout(slowNotice);
+            clearTimeout(joinTimer);
         }
     }
 }
 
-async function attemptConnect() {
+async function attemptConnect(generation) {
     let username = variable.username || "";
     let xp = variable.persistentXP || 0;
     let idToken = null;
+    let accountUid = null;
 
     // Fixed for the lifetime of this connection: where its progression is
     // saved never follows later changes to the global identity (e.g. the
@@ -117,34 +188,63 @@ async function attemptConnect() {
         variable.username = profile.name;
         variable.persistentXP = profile.xp;
     } else {
+        // The uid comes from Firebase Auth on its own, before anything that
+        // can fail independently (a Firestore read, a token refresh): if it
+        // were only known after the profile read succeeded, one failed read
+        // would leave this whole connection with nowhere to save XP.
+        let user = null;
         try {
-            const session = await getSession();
-            if (session?.username) {
-                username = session.username;
-                variable.username = session.username;
-            }
-            if (session?.xp != null) {
-                xp = session.xp;
-                variable.persistentXP = session.xp;
-            }
-            if (session?.user) {
+            user = await waitForAuth();
+        } catch {
+        }
+
+        if (user) {
+            accountUid = user.uid;
+
+            try {
                 // Lets the server verify who this is (for ban checks) instead
                 // of trusting the free-text username alone. Safe to send from
                 // every build: it's the player's own per-session token, not a
                 // secret, and the server only uses it to read their uid.
-                idToken = await session.user.getIdToken();
+                idToken = await user.getIdToken();
+            } catch {
             }
-        } catch {
+
+            // Finish any XP saves still queued or in flight for this account
+            // (e.g. an FFA kill moments before leaving, or a save that failed
+            // earlier), THEN read the profile, so the join uses a total that
+            // already includes them.
+            try {
+                await flushAccountXP(accountUid);
+            } catch {
+            }
+
+            try {
+                const profile = await getUserProfile(accountUid);
+                if (profile?.username) {
+                    username = profile.username;
+                    variable.username = profile.username;
+                }
+                xp = sanitizeXP(profile?.xp);
+                variable.persistentXP = xp;
+            } catch {
+                // Keep the XP we already had (from the Home screen); saving
+                // still works because accountUid is known.
+            }
         }
     }
 
-    // The mode is chosen by which room type we join; the server enforces
-    // that room's rules. FFA ignores persistent XP, so it isn't sent there.
-    const requestedMode = normalizeGameMode(variable.gameMode);
-    const joinOptions = { username, idToken };
-    if (requestedMode === GAME_MODES.MAIN) {
-        joinOptions.xp = xp;
+    // Abandoned (timed out) while still preparing: don't start a join at all.
+    if (generation !== attemptGeneration) {
+        const stale = new Error("Discarded a join started for a different session.");
+        stale.name = "StaleJoinError";
+        throw stale;
     }
+
+    // The mode is chosen by which room type we join; the server enforces
+    // that room's rules. Both modes start from the player's persistent XP.
+    const requestedMode = normalizeGameMode(variable.gameMode);
+    const joinOptions = { username, idToken, xp };
 
     // Only the separate developer build ever sets isDevBuild(true), and
     // only that build's own env has VITE_DEV_SECRET — a normal production
@@ -167,9 +267,16 @@ async function attemptConnect() {
     // session now running is stale (the player changed account/guest or mode
     // while it was pending). Leave it instead of adopting it, so it can never
     // save one provider's XP into the other's store.
-    if (variable.identity !== identity || normalizeGameMode(variable.gameMode) !== requestedMode) {
+    // Likewise for a join that was abandoned by the timeout above.
+    if (
+        generation !== attemptGeneration ||
+        variable.identity !== identity ||
+        normalizeGameMode(variable.gameMode) !== requestedMode
+    ) {
         room.leave();
-        throw new Error("Discarded a join started for a different session.");
+        const stale = new Error("Discarded a join started for a different session.");
+        stale.name = "StaleJoinError";
+        throw stale;
     }
 
     console.log("✅ Connected!");
@@ -270,19 +377,27 @@ async function attemptConnect() {
             variable.devLog.push("You were kicked: " + (data?.reason || "no reason given"));
         });
 
+        // A persistent-XP change (main-mode XP banked at death, an FFA kill
+        // reward, a dev command), as an event with a server-generated id. It
+        // is applied to this connection's own provider and acknowledged only
+        // once saved; the server re-sends unacknowledged ones, and the id
+        // makes repeats harmless.
         room.onMessage("persistXP", (data) => {
-            // Only main mode has persistent progression. The server never
-            // sends this from an FFA room; ignoring it here as well means FFA
-            // XP can't reach a save even if that ever changed.
-            if (syncGameMode(room) !== GAME_MODES.MAIN) {
-                return;
+            if (data?.xp != null) {
+                variable.persistentXP = sanitizeXP(data.xp); // display only
+                updateProgressHud();
             }
 
-            const nextXP = sanitizeXP(data?.xp);
-            variable.persistentXP = nextXP;
-            variable.runXP = 0;
-            updateProgressHud();
-            saveProgress(identity, nextXP);
+            submitXPEvent({
+                identity,
+                uid: accountUid,
+                event: data,
+                onSaved: (eventId) => {
+                    if (variable.room === room) {
+                        room.send("persistAck", { eventId });
+                    }
+                },
+            });
         });
 
         const callbacks = Callbacks.get(room);
@@ -307,7 +422,7 @@ async function attemptConnect() {
             callbacks.onChange(playerState, () => {
                 const isLocal = sessionId === variable.playerId;
                 const remote = variable.allPlayers[sessionId];
-                const mode = syncGameMode(room);
+                syncGameMode(room);
 
                 // The server bumps deathCount exactly once per death, so this
                 // fires once even if the death and the respawn arrive in the
@@ -331,7 +446,7 @@ async function attemptConnect() {
                     remote.targetX = playerState.x;
                     remote.targetY = playerState.y;
                     setRemotePlayerName(remote, playerState.name);
-                    applyPlayerPolygon(remote, getPlayerLevelFromState(playerState, mode));
+                    applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
 
                     const prevHealth = remote.health;
                     const nextHealth = playerState.health;
@@ -360,7 +475,7 @@ async function attemptConnect() {
 
                     applyLocalPlayerState(playerState);
                     if (remote) {
-                        applyPlayerPolygon(remote, getPlayerLevelFromState(playerState, mode));
+                        applyPlayerPolygon(remote, getPlayerLevelFromState(playerState));
                     }
 
                     if (pendingDeath != null) {
@@ -402,16 +517,6 @@ async function attemptConnect() {
             destroyPlayer(sessionId);
         });
         
-    // A player who just died while offline (or whose connection drops the
-    // instant they do) shouldn't lose XP they already earned just because
-    // this one write failed — try again a few times, and if that's still
-    // not enough, stash it so a later page load can finish the job instead
-    // of silently discarding it. Firebase accounts only: guest saves are
-    // local and synchronous, so they never leave anything pending.
-    if (identity !== "guest") {
-        flushPendingXP();
-    }
-
     return room;
 }
 
@@ -424,76 +529,6 @@ function syncGameMode(room) {
     return variable.gameMode;
 }
 
-// Persistent main-mode progression goes to exactly one provider: the one
-// this connection was opened for (Home screen choice), not whether Firebase
-// happens to have a signed-in user.
-function saveProgress(identity, xp) {
-    if (identity === "guest") {
-        saveGuestXP(xp);
-        return;
-    }
-
-    persistXPWithRetry(xp);
-}
-
-const PENDING_XP_KEY = "pendingPersistXP";
-const PERSIST_RETRY_DELAYS_MS = [1000, 3000, 10000];
-
-async function persistXPWithRetry(xp, attempt = 0) {
-    try {
-        await persistXP(xp);
-        clearPendingXP(xp);
-    } catch (e) {
-        console.error(`❌ persistXP failed (attempt ${attempt + 1}):`, e);
-
-        if (attempt < PERSIST_RETRY_DELAYS_MS.length) {
-            setTimeout(() => persistXPWithRetry(xp, attempt + 1), PERSIST_RETRY_DELAYS_MS[attempt]);
-        } else {
-            savePendingXP(xp);
-        }
-    }
-}
-
-function savePendingXP(xp) {
-    try {
-        // Never stash a value lower than whatever's already pending —
-        // another failed save earlier in the same outage may have recorded
-        // a higher (more up to date) amount already.
-        const existing = Number(localStorage.getItem(PENDING_XP_KEY));
-        if (!Number.isFinite(existing) || xp > existing) {
-            localStorage.setItem(PENDING_XP_KEY, String(xp));
-        }
-    } catch {
-        // localStorage unavailable (private browsing, etc.) — nothing more
-        // we can do locally; the attempt was already logged above.
-    }
-}
-
-function clearPendingXP(savedXp) {
-    try {
-        const existing = Number(localStorage.getItem(PENDING_XP_KEY));
-        if (Number.isFinite(existing) && existing <= savedXp) {
-            localStorage.removeItem(PENDING_XP_KEY);
-        }
-    } catch {
-    }
-}
-
-// Runs once per successful connection: if a previous session left XP that
-// never made it to Firestore, retry it now rather than leaving it stranded
-// in localStorage forever.
-function flushPendingXP() {
-    let pending;
-    try {
-        pending = Number(localStorage.getItem(PENDING_XP_KEY));
-    } catch {
-        return;
-    }
-
-    if (Number.isFinite(pending) && pending > 0) {
-        persistXPWithRetry(pending);
-    }
-}
 
 // Developer build only. Reports whether the client side of dev auth is
 // configured and whether the token is actually on this join request, so a
@@ -501,8 +536,13 @@ function flushPendingXP() {
 // silently doing nothing. Never prints the token itself.
 function logDevTokenDiagnostic(joinOptions) {
     const mode = import.meta.env.MODE;
+    // The usual cause is starting Vite with plain `npm run dev` (mode
+    // "development") and opening dev.html: the page is the dev build, but
+    // Vite only reads client/.env.devtools in mode "devtools".
     const message = !import.meta.env.VITE_DEV_SECRET
-        ? `✗ Client developer configuration is missing: VITE_DEV_SECRET is not set (Vite mode "${mode}"). Set it in client/.env.devtools and restart the dev server.`
+        ? (mode !== "devtools"
+            ? `✗ No developer token: this dev page is being served in Vite mode "${mode}", and client/.env.devtools is only loaded in mode "devtools". Start it with \`npm run dev:devtools\` (or build:devtools / preview:devtools).`
+            : `✗ Client developer configuration is missing: VITE_DEV_SECRET is not set in client/.env.devtools (Vite mode "devtools"). Add it there and restart the dev server.`)
         : !joinOptions.devToken
             ? `✗ Developer token was not included in the connection request (VITE_DEV_SECRET is set, mode "${mode}").`
             : `Dev token sent to ${SERVER_URL} (Vite mode "${mode}"). Waiting for server authorization…`;
@@ -520,16 +560,11 @@ function applyLocalPlayerState(playerState) {
         variable.playerMaxHealth = playerState.maxHealth;
     }
 
-    if (variable.gameMode === GAME_MODES.FFA) {
-        // FFA progression is the run's temporary XP. The persistent XP held
-        // on this client is left exactly as it was.
-        variable.ffaXP = sanitizeXP(playerState.ffaXP);
-    } else {
-        if (playerState.xp != null) {
-            variable.persistentXP = playerState.xp;
-        }
-        variable.runXP = playerState.runXP ?? 0;
+    // Same in every mode: FFA plays on the player's persistent progression.
+    if (playerState.xp != null) {
+        variable.persistentXP = playerState.xp;
     }
+    variable.runXP = playerState.runXP ?? 0;
 
     variable.spawnExited = !!playerState.spawnExited;
     variable.fastfallReady = playerState.fastfallReady !== false;
