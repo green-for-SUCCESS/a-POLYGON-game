@@ -7,14 +7,16 @@ import { variable } from "../GameValues/LocalVariables.js";
 import { playerMovementCheck, updateRemotePlayers, enforceLocalSpawnBoundary } from "../Entities/Players.js";
 import { applyEnemySnapshot, drawEnemyDebug } from "../Entities/Enemies.js";
 import { drawMinimap } from "../UI/Minimap.js";
+import { updateBossHealthBar } from "../UI/BossUI.js";
 
-export function update() {
+export function update(time, delta) {
 
     if (variable.room) {
         updateRemotePlayers();
         applyEnemySnapshot(readEnemySnapshot(variable.room.state?.enemies));
         drawMinimap();
     }
+    updateBossHealthBar(delta);
 
     if (SETTINGS.DEBUG_ENEMY_ATTACKS && this.enemyDebugGraphics) {
         drawEnemyDebug(this.enemyDebugGraphics);

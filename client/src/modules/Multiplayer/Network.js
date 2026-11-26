@@ -12,6 +12,7 @@ import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js"
 import { toXP, xpToString } from "../../../../shared-data/XPMath.js";
 import { ROOM_NAMES, normalizeGameMode } from "../../../../shared-data/GameModes.js";
 import { loadGuestProfile } from "./GuestStore.js";
+import { showBossSpawnNotice } from "../UI/BossUI.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { isDevBuild } from "../Dev/DevFlag.js";
 import { showConnectionStatus, hideConnectionStatus } from "./ConnectionStatus.js";
@@ -343,6 +344,11 @@ async function attemptConnect(generation) {
                 variable.player,
                 data.strength ?? SETTINGS.ENEMY_KNOCKBACK
             );
+        });
+
+        // Sent once per boss, to everyone, when it actually spawns.
+        room.onMessage("bossSpawned", (data) => {
+            showBossSpawnNotice(data?.id);
         });
 
         room.onMessage("fastfallDenied", () => {

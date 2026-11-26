@@ -13,10 +13,12 @@ export const PlayerState = schema({
     fastfallReady: { type: "boolean", default: true },
     name: { type: "string", default: "Player" },
     // Persistent XP as an exact decimal string: it can exceed what a Number
-    // holds exactly (developer commands go up to 10^250). runXP stays a
-    // number, since ordinary gameplay XP is capped at 10^15 (< 2^53).
+    // holds exactly (developer commands go up to 10^250). runXP is a
+    // string for the same reason.
     xp: { type: "string", default: "0" },
-    runXP: { type: "number", default: 0 },
+    // Unbanked run XP, also an exact decimal string (gameplay XP can reach
+    // 10^50, beyond what a Number holds exactly).
+    runXP: { type: "string", default: "0" },
     spawnExited: { type: "boolean", default: false },
     slashDirX: { type: "number", default: 0 },
     slashDirY: { type: "number", default: 0 },

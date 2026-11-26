@@ -60,6 +60,7 @@ export class HeadlessGame {
         this.pendingKnockbacks = [];
         this.pendingPersists = [];
         this.pendingFastfallDenials = [];
+        this.pendingBossSpawns = [];
 
         this._setupGround();
     }
@@ -110,8 +111,7 @@ export class HeadlessGame {
         }
         const room = XP_REGULAR_CAP - total;
         const add = toXP(reward) > room ? room : toXP(reward);
-        // runXP stays a Number: it is below the regular cap (< 2^53), so exact.
-        player.runXP = Number(toXP(player.runXP) + add);
+        player.runXP = xpToString(toXP(player.runXP) + add);
     }
 
     // Ordinary gameplay XP added straight to persistent XP and saved now
@@ -131,7 +131,7 @@ export class HeadlessGame {
 
         player.maxHealth = stats.maxHealth;
         player.health = stats.maxHealth;
-        player.runXP = 0;
+        player.runXP = "0";
         player.spawnExited = false;
         player.isFastFalling = false;
         player.x = SETTINGS.PLAYER_START_X;
@@ -605,6 +605,8 @@ export class HeadlessGame {
             // credit when it dies. Lives and dies with this boss.
             body.damageBy = new Map();
             this.bossEnemyId = id;
+            // Announced to every player once the boss really exists.
+            this.pendingBossSpawns.push({ id });
         }
 
         this.enemies.set(id, { body });
@@ -802,15 +804,21 @@ export class HeadlessGame {
 
         // runXP was already capped as it was earned; addRegularXP re-checks
         // in case persistent XP changed meanwhile (e.g. /setxp).
-        const { xp, added } = addRegularXP(player.xp, player.runXP || 0);
+        const { xp, added } = addRegularXP(player.xp, player.runXP);
         player.xp = xpToString(xp);
-        player.runXP = 0;
+        player.runXP = "0";
         this._queueXPEvent(sessionId, "addRegular", added);
     }
 
     flushKnockbacks() {
         const events = this.pendingKnockbacks;
         this.pendingKnockbacks = [];
+        return events;
+    }
+
+    flushBossSpawns() {
+        const events = this.pendingBossSpawns;
+        this.pendingBossSpawns = [];
         return events;
     }
 

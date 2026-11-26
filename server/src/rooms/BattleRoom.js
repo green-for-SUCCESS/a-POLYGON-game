@@ -116,6 +116,7 @@ export class BattleRoom extends Room {
             this._dispatchKnockbacks();
             this._dispatchFastfallDenials();
             this._dispatchPersists();
+            this._dispatchBossSpawns();
             this._resendUnackedXP();
             this._dispatchDevAuthResults();
         });
@@ -341,6 +342,14 @@ export class BattleRoom extends Room {
         return nextState
             ? `XP freezing enabled for ${username}`
             : `XP freezing disabled for ${username}`;
+    }
+
+    // Every connected player gets the announcement, wherever they are. The
+    // boss's enemy id lets clients ignore a repeat of the same boss.
+    _dispatchBossSpawns() {
+        for (const event of this.game.flushBossSpawns()) {
+            this.broadcast("bossSpawned", { id: String(event.id) });
+        }
     }
 
     _dispatchFastfallDenials() {

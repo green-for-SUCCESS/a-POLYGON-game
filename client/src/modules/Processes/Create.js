@@ -10,10 +10,12 @@ import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
 import { variable } from "../GameValues/LocalVariables.js";
 import { createMinimap } from "../UI/Minimap.js";
+import { resetBossUI } from "../UI/BossUI.js";
 
 export function create() {
 
     variable.sceneRef = this;
+    resetBossUI();
 
     connect();
 

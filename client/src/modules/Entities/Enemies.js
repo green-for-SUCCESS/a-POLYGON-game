@@ -108,15 +108,22 @@ function createEnemyVisual(scene, snap) {
     return visual;
 }
 
-function applyStateTint(visual) {
-    const tints = {
-        [ENEMY_STATE.IDLE]: ENEMY_RARITY_COLORS[visual.rarity] ?? 0xffffff,
-        [ENEMY_STATE.WINDUP]: 0xffaa00,
-        [ENEMY_STATE.ATTACK]: 0xff0000,
-        [ENEMY_STATE.COOLDOWN]: 0xaaaaaa,
-    };
+// Color comes from rarity only (ENEMY_RARITY_COLORS), applied once over a
+// white texture. It used to be (a) baked into the texture AND tinted again,
+// and (b) replaced by orange/red/gray tints while winding up, attacking or
+// cooling down, so one rarity showed several colors depending on what the
+// enemy was doing. The attack telegraph is now shown with transparency
+// instead, which keeps the color itself canonical.
+const STATE_ALPHA = {
+    [ENEMY_STATE.IDLE]: 1,
+    [ENEMY_STATE.WINDUP]: 0.6,
+    [ENEMY_STATE.ATTACK]: 0.35,
+    [ENEMY_STATE.COOLDOWN]: 1,
+};
 
-    visual.sprite.setTint(tints[visual.state] ?? 0xffffff);
+function applyStateTint(visual) {
+    visual.sprite.setTint(ENEMY_RARITY_COLORS[visual.rarity] ?? 0xffffff);
+    visual.sprite.setAlpha(STATE_ALPHA[visual.state] ?? 1);
 }
 
 export function drawEnemyDebug(graphics) {

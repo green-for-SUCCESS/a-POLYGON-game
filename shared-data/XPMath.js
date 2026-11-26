@@ -13,9 +13,9 @@
 // below, never altered otherwise.
 //
 // Two caps:
-//   XP_REGULAR_CAP (10^15): ordinary gameplay (enemy kills, FFA kills, boss
-//     rewards) never raises XP beyond this. 10^15 < 2^53, so regular XP is
-//     always exactly representable as a Number too.
+//   XP_REGULAR_CAP (10^50): ordinary gameplay (enemy kills, FFA kills, boss
+//     rewards) never raises XP beyond this. It is far above 2^53, so run XP
+//     is a decimal string / BigInt like persistent XP.
 //   XP_DEV_CAP (10^250): the hard ceiling for any XP value, reachable only
 //     through developer commands.
 

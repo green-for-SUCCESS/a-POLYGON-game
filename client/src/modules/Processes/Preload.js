@@ -2,7 +2,7 @@
 // PRELOAD
 // =====================================================
 
-import { SETTINGS, ENEMY_RARITY_COLORS } from "../../../../shared-data/Constants.js";
+import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { getEnemySides, getEnemyRadius, getRegularPolygonPoints } from "../../../../shared-data/Geometry.js";
 
 export function preload() {
@@ -24,7 +24,9 @@ export function preload() {
         const g = this.add.graphics();
         const points = getRegularPolygonPoints(size / 2, size / 2, sides, radius);
 
-        g.fillStyle(ENEMY_RARITY_COLORS[rarity], 1);
+        // White, like the player textures: the rarity color is applied once,
+        // as the sprite tint (client Enemies.js), never twice.
+        g.fillStyle(0xffffff, 1);
         g.beginPath();
         g.moveTo(points[0].x, points[0].y);
         for (let i = 1; i < points.length; i++) {

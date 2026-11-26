@@ -78,6 +78,9 @@ export const SETTINGS = {
     BOSS_REWARD_MIN_SHARE: 0.05,
     BOSS_REWARD_BONUS_SHARE: 0.5,
     BOSS_REWARD_BONUS_XP_STEPS: 3,
+    // Client only: the boss health bar shows while your player is within
+    // this many pixels of the live boss.
+    BOSS_HEALTH_BAR_RANGE: 1500,
     ENEMY_SIDE_LENGTH: 50,
 
     // ---------------- ENEMY STATS ----------------
@@ -131,7 +134,7 @@ export const SETTINGS = {
     // XP caps, as powers of ten (see XPMath.js). Ordinary gameplay rewards
     // stop at 10^XP_REGULAR_CAP_EXPONENT; developer commands can go up to
     // 10^XP_DEV_CAP_EXPONENT, the ceiling for any XP value.
-    XP_REGULAR_CAP_EXPONENT: 15,
+    XP_REGULAR_CAP_EXPONENT: 50,
     XP_DEV_CAP_EXPONENT: 250,
 
     PLAYER_BASE_MAX_HEALTH: 20,
@@ -208,7 +211,9 @@ export const ENEMY_STATE = {
     COOLDOWN: 3
 };
 
-// One per rarity 0..ENEMY_BOSS_RARITY (the last is the boss).
+// THE rarity -> color mapping (one per rarity 0..ENEMY_BOSS_RARITY; the
+// last is the boss). Enemy textures are drawn white and tinted with exactly
+// this color, so every enemy of a rarity looks the same everywhere.
 export const ENEMY_RARITY_COLORS = [
     0xff4444, // 0
     0xffaa33, // 1
@@ -223,8 +228,5 @@ export const ENEMY_RARITY_COLORS = [
     0xff7733, // 10
     0x3366cc, // 11
     0xdddddd, // 12
-    // Enemy textures are filled with their color AND tinted with it, so the
-    // color is effectively squared; it must stay bright to show on the black
-    // background (a dark gray here made the boss nearly invisible).
-    0xff22ff, // 13 boss
+    0xff22ff, // 13 boss (distinct magenta)
 ];
