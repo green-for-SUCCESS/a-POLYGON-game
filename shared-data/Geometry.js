@@ -1,12 +1,16 @@
 import { SETTINGS } from "./Constants.js";
 
-// Enemies: one side per rarity point from rarity 3 up, capped at
-// ENEMY_MAX_SIDES, so the rarity-13 boss is the only 13-sided enemy and
-// rarities 0-3 are triangles (zone 1 keeps its triangles).
-export const ENEMY_MAX_SIDES = 13;
+// Enemies: shape comes straight from rarity, sides = rarity + 2 (rarity 1 =
+// triangle ... rarity 13 boss = 15 sides). This is the only place enemy
+// geometry is derived from: the server's collision body (getEnemyBodyMetrics)
+// and the client's textures/size both use it, so they always agree, and zone
+// plays no part. Independent of the player's level-based shape and its
+// 7-side cap. (Rarity 0, never spawned by zones, stays a triangle.)
+export const ENEMY_MAX_SIDES = SETTINGS.ENEMY_BOSS_RARITY + 2;
 
 export function getEnemySides(rarity) {
-    return Math.max(3, Math.min(ENEMY_MAX_SIDES, rarity | 0));
+    const r = Math.max(0, Math.min(SETTINGS.ENEMY_BOSS_RARITY, rarity | 0));
+    return Math.max(3, r + 2);
 }
 
 export function getRegularPolygonRadius(sides, sideLength = SETTINGS.ENEMY_SIDE_LENGTH) {
@@ -75,7 +79,7 @@ export function getRegularPolygonSideForArea(area, sides) {
 export const PLAYER_MIN_SIDES = 3;
 // Evolution stops here (heptagon). This caps the SHAPE only: levels, XP and
 // every level-based stat keep growing past it (see Progression.js). Player
-// and enemy side limits are independent (see ENEMY_MAX_SIDES).
+// and enemy shapes are independent (see getEnemySides).
 export const PLAYER_MAX_SIDES = 7;
 
 // Polygon evolution. Each evolution takes 10 more levels than the previous
