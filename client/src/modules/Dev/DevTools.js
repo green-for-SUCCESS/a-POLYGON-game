@@ -45,18 +45,33 @@ function _buildConsole() {
     title.style.cssText = "font-weight:bold;margin-bottom:4px;opacity:0.8;letter-spacing:1px;";
 
     logEl = document.createElement("div");
-    logEl.style.cssText = "max-height:140px;overflow-y:auto;margin-bottom:4px;white-space:pre-wrap;line-height:1.4;";
+    // Long unbroken values (e.g. a 250-digit XP amount) wrap instead of
+    // stretching the panel.
+    logEl.style.cssText = "max-height:140px;overflow-y:auto;margin-bottom:4px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.4;";
 
+    // No length limit: the field accepts any amount of text and scrolls
+    // horizontally (keeping the caret, i.e. the newest characters, in view)
+    // as you type. Amounts are sent to the server as the exact text typed.
     inputEl = document.createElement("input");
     inputEl.type = "text";
     inputEl.placeholder = "/givexp 500";
     inputEl.autocomplete = "off";
     inputEl.spellcheck = false;
+    inputEl.removeAttribute("maxlength");
     inputEl.style.cssText = [
         "width:100%", "box-sizing:border-box", "background:#000", "color:#39ff88",
         "border:1px solid #39ff88", "border-radius:4px", "padding:4px",
         "font-family:monospace", "font-size:12px",
+        "overflow-x:auto", "white-space:nowrap", "text-overflow:clip",
     ].join(";");
+
+    // Pasted text lands with the caret at the end, but some browsers leave
+    // the view scrolled to the start; keep the newest characters visible.
+    inputEl.addEventListener("input", () => {
+        if (inputEl.selectionStart === inputEl.value.length) {
+            inputEl.scrollLeft = inputEl.scrollWidth;
+        }
+    });
 
     inputEl.addEventListener("keydown", (event) => {
         // Stop ordinary game controls (WASD, slash, etc.) from firing while
@@ -92,8 +107,25 @@ function _log(message) {
 // Client-side parsing here is for usage feedback only (e.g. "you forgot the
 // amount") — it is never trusted as validation. The server re-parses and
 // re-validates every argument independently before doing anything.
+// The server's WebSocket rejects (and disconnects) frames over 4 KB, so an
+// argument that can't possibly be valid is rejected here instead of being
+// sent. 10^250 has 251 digits; anything longer (after leading zeros) or any
+// player name longer than this is reported locally.
+const MAX_ARG_CHARS = 300;
+
+function _argTooLong(value) {
+    const s = String(value ?? "");
+    return s.replace(/^0+(?=\d)/, "").length > MAX_ARG_CHARS;
+}
+
+// Echoing a megabyte-long command into the log would only slow the page
+// down; the command itself is always used in full.
+function _echo(text) {
+    return text.length > 300 ? `${text.slice(0, 300)}… (${text.length} characters)` : text;
+}
+
 function _runCommand(text) {
-    _log("> " + text);
+    _log("> " + _echo(text));
 
     if (!variable.room) {
         _log("Not connected to a game session.");
@@ -110,6 +142,21 @@ function _runCommand(text) {
     }
 
     const [cmd, ...rest] = text.split(/\s+/);
+
+    const tooLong = rest.find(_argTooLong);
+    if (tooLong !== undefined) {
+        _log(/^\d/.test(tooLong)
+            ? "Amount is above the maximum of 10^250 (or not a valid whole number)."
+            : `Argument is too long (over ${MAX_ARG_CHARS} characters).`);
+        return;
+    }
+    // Leading zeros carry no value; drop them so a padded but valid amount
+    // still fits comfortably in one message.
+    for (let i = 0; i < rest.length; i++) {
+        if (/^\d+$/.test(rest[i])) {
+            rest[i] = rest[i].replace(/^0+(?=\d)/, "");
+        }
+    }
 
     if (cmd === "/ban") {
         const [username, hours] = rest;
@@ -131,14 +178,16 @@ function _runCommand(text) {
             _log("Usage: /givexp <amount> [player]");
             return;
         }
-        variable.room.send("devGiveXP", { amount: Number(amount), username: username ?? null });
+        // Sent as typed: the server parses it exactly (BigInt), so long
+        // values like 1e250 or 300-digit numbers aren't rounded here.
+        variable.room.send("devGiveXP", { amount: String(amount), username: username ?? null });
     } else if (cmd === "/setxp") {
         const [amount, username] = rest;
         if (amount === undefined) {
             _log("Usage: /setxp <amount> [player]");
             return;
         }
-        variable.room.send("devSetXP", { amount: Number(amount), username: username ?? null });
+        variable.room.send("devSetXP", { amount: String(amount), username: username ?? null });
     } else if (cmd === "/togglefreezexp") {
         const [username] = rest;
         if (!username) {

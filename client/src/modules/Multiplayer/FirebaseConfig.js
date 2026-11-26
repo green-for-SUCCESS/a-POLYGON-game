@@ -18,7 +18,7 @@ import {
     runTransaction,
     serverTimestamp
 } from "firebase/firestore";
-import { sanitizeXP } from "../../../../shared-data/Progression.js";
+import { toXP, xpToString } from "../../../../shared-data/XPMath.js";
 import { applyXPEvent } from "../../../../shared-data/XPEvents.js";
 
 // TODO: Add SDKs for Firebase products that you want to use
@@ -96,7 +96,7 @@ export async function getSession() {
     return {
         user,
         username: profile?.username ?? null,
-        xp: sanitizeXP(profile?.xp)
+        xp: xpToString(toXP(profile?.xp))
     };
 }
 
@@ -108,7 +108,7 @@ export async function signInWithGoogle() {
     return {
         user: result.user,
         username: profile?.username ?? null,
-        xp: sanitizeXP(profile?.xp)
+        xp: xpToString(toXP(profile?.xp))
     };
 }
 

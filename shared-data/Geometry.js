@@ -1,8 +1,12 @@
 import { SETTINGS } from "./Constants.js";
 
+// Enemies: one side per rarity point from rarity 3 up, capped at
+// ENEMY_MAX_SIDES, so the rarity-13 boss is the only 13-sided enemy and
+// rarities 0-3 are triangles (zone 1 keeps its triangles).
+export const ENEMY_MAX_SIDES = 13;
+
 export function getEnemySides(rarity) {
-    const clamped = Math.max(0, Math.min(SETTINGS.ENEMY_RARITY_MAX, rarity | 0));
-    return 3 + clamped;
+    return Math.max(3, Math.min(ENEMY_MAX_SIDES, rarity | 0));
 }
 
 export function getRegularPolygonRadius(sides, sideLength = SETTINGS.ENEMY_SIDE_LENGTH) {
@@ -69,19 +73,18 @@ export function getRegularPolygonSideForArea(area, sides) {
 }
 
 export const PLAYER_MIN_SIDES = 3;
-// Evolution stops here so high-level players stay recognisably polygons
-// instead of turning into circles. This caps the SHAPE only: levels, XP and
-// every level-based stat keep growing past it (see Progression.js).
-export const PLAYER_MAX_SIDES = 12;
+// Evolution stops here (heptagon). This caps the SHAPE only: levels, XP and
+// every level-based stat keep growing past it (see Progression.js). Player
+// and enemy side limits are independent (see ENEMY_MAX_SIDES).
+export const PLAYER_MAX_SIDES = 7;
 
 // Polygon evolution. Each evolution takes 10 more levels than the previous
 // one: triangle -> square takes 15, square -> pentagon 25, pentagon ->
 // hexagon 35, and so on. Evolution k therefore costs 5 + 10k levels, so a
 // player with 3 + k sides has reached level
 //   1 + sum_{i=1..k} (5 + 10i) = 1 + 10k + 5k^2
-// (square at 16, pentagon at 41, hexagon at 76, heptagon at 121, octagon at
-// 176, nonagon at 241, decagon at 316, hendecagon at 401, dodecagon at 496),
-// after which the side count stays at PLAYER_MAX_SIDES. This is the only
+// (square at 16, pentagon at 41, hexagon at 76, heptagon at 121), after
+// which the side count stays at PLAYER_MAX_SIDES. This is the only
 // place the thresholds live; everything else derives the shape from the
 // level through getPlayerSides.
 export function getPlayerEvolutionLevel(sides) {

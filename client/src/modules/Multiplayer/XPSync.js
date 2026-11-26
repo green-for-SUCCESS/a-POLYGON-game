@@ -22,7 +22,7 @@
 import { applyXPEventToAccount } from "./FirebaseConfig.js";
 import { applyGuestXPEvent } from "./GuestStore.js";
 import { normalizeXPEvent } from "../../../../shared-data/XPEvents.js";
-import { sanitizeXP } from "../../../../shared-data/Progression.js";
+import { toXP } from "../../../../shared-data/XPMath.js";
 
 const PENDING_PREFIX = "apg.pendingXPEvents.";
 const LEGACY_PENDING_KEY = "pendingPersistXP"; // absolute total, older clients
@@ -125,9 +125,9 @@ function migrateLegacyPending(uid) {
         if (raw == null) {
             return;
         }
-        const value = sanitizeXP(raw);
-        if (value > 0) {
-            enqueue(uid, { eventId: `legacy-${uid}-${value}`, kind: "max", amount: value });
+        const value = toXP(raw);
+        if (value > 0n) {
+            enqueue(uid, { eventId: `legacy-${uid}-${value}`, kind: "max", amount: value.toString() });
         }
         localStorage.removeItem(LEGACY_PENDING_KEY);
     } catch {

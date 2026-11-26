@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import { allBlocks, groundBlocks, stoneObjects, spikePositions,} from "../../../../shared-data/Environment.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
 import { getRunXPTotal, getLevelProgress, getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
+import { formatXP } from "../../../../shared-data/XPMath.js";
 import { getPlayerSides, getPlayerSideLengthForSides, getRegularPolygonRadius, getRegularPolygonMetrics, getRegularPolygonPoints } from "../../../../shared-data/Geometry.js";
 import { getSpawnZoneEnd } from "../../../../shared-data/Zones.js";
 import { variable } from "../GameValues/LocalVariables.js";
@@ -239,7 +240,7 @@ export function updateProgressHud() {
     const total = getRunXPTotal(variable.persistentXP, variable.runXP);
     const { level, intoLevel, span } = getLevelProgress(total);
     const prefix = isFFA ? "FFA " : "";
-    variable.xpHud.setText(`${prefix}Lv ${level}  ${Math.floor(intoLevel)}/${Math.floor(span)} XP`);
+    variable.xpHud.setText(`${prefix}Lv ${level}  ${formatXP(intoLevel)}/${formatXP(span)} XP`);
 }
 
 export function enforceLocalSpawnBoundary() {

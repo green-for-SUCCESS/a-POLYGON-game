@@ -8,7 +8,8 @@ import { waitForAuth, getUserProfile } from "./FirebaseConfig.js";
 import { submitXPEvent, flushAccountXP } from "./XPSync.js";
 import { applyKnockback } from "../Logic/Physics.js";
 import { playSlashEffect } from "../Entities/Effects.js";
-import { getPlayerLevelFromState, sanitizeXP } from "../../../../shared-data/Progression.js";
+import { getPlayerLevelFromState } from "../../../../shared-data/Progression.js";
+import { toXP, xpToString } from "../../../../shared-data/XPMath.js";
 import { ROOM_NAMES, normalizeGameMode } from "../../../../shared-data/GameModes.js";
 import { loadGuestProfile } from "./GuestStore.js";
 import { SETTINGS } from "../../../../shared-data/Constants.js";
@@ -168,7 +169,7 @@ async function connectWithRetry() {
 
 async function attemptConnect(generation) {
     let username = variable.username || "";
-    let xp = variable.persistentXP || 0;
+    let xp = xpToString(toXP(variable.persistentXP));
     let idToken = null;
     let accountUid = null;
 
@@ -184,9 +185,9 @@ async function attemptConnect(generation) {
         // attempt so a reconnect uses the latest saved XP.
         const { profile } = loadGuestProfile();
         username = profile.name;
-        xp = profile.xp;
+        xp = xpToString(toXP(profile.xp));
         variable.username = profile.name;
-        variable.persistentXP = profile.xp;
+        variable.persistentXP = xp;
     } else {
         // The uid comes from Firebase Auth on its own, before anything that
         // can fail independently (a Firestore read, a token refresh): if it
@@ -225,7 +226,7 @@ async function attemptConnect(generation) {
                     username = profile.username;
                     variable.username = profile.username;
                 }
-                xp = sanitizeXP(profile?.xp);
+                xp = xpToString(toXP(profile?.xp));
                 variable.persistentXP = xp;
             } catch {
                 // Keep the XP we already had (from the Home screen); saving
@@ -384,7 +385,7 @@ async function attemptConnect(generation) {
         // makes repeats harmless.
         room.onMessage("persistXP", (data) => {
             if (data?.xp != null) {
-                variable.persistentXP = sanitizeXP(data.xp); // display only
+                variable.persistentXP = xpToString(toXP(data.xp)); // display only
                 updateProgressHud();
             }
 
@@ -562,7 +563,7 @@ function applyLocalPlayerState(playerState) {
 
     // Same in every mode: FFA plays on the player's persistent progression.
     if (playerState.xp != null) {
-        variable.persistentXP = playerState.xp;
+        variable.persistentXP = xpToString(toXP(playerState.xp));
     }
     variable.runXP = playerState.runXP ?? 0;
 

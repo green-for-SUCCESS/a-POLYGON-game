@@ -12,7 +12,10 @@ export const PlayerState = schema({
     isFastFalling: { type: "boolean", default: false },
     fastfallReady: { type: "boolean", default: true },
     name: { type: "string", default: "Player" },
-    xp: { type: "number", default: 0 },
+    // Persistent XP as an exact decimal string: it can exceed what a Number
+    // holds exactly (developer commands go up to 10^250). runXP stays a
+    // number, since ordinary gameplay XP is capped at 10^15 (< 2^53).
+    xp: { type: "string", default: "0" },
     runXP: { type: "number", default: 0 },
     spawnExited: { type: "boolean", default: false },
     slashDirX: { type: "number", default: 0 },

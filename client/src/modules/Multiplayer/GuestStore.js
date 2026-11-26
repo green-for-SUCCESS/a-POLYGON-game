@@ -14,7 +14,7 @@
 // Level and polygon shape are derived from XP. Runtime/combat state, room
 // objects and developer tokens are never written here.
 
-import { sanitizeXP } from "../../../../shared-data/Progression.js";
+import { toXP, xpToStorage } from "../../../../shared-data/XPMath.js";
 import { applyXPEvent } from "../../../../shared-data/XPEvents.js";
 
 const STORAGE_KEY = "apg.guestProfile";
@@ -81,7 +81,8 @@ function normalizeProfile(raw) {
             : GUEST_SAVE_VERSION,
         guestId,
         name: guestNameFor(guestId),
-        xp: sanitizeXP(raw.xp),
+        // A Number while exact, a decimal string above 2^53 (see XPMath.js).
+        xp: xpToStorage(toXP(raw.xp)),
         xpEventIds: Array.isArray(raw.xpEventIds)
             ? raw.xpEventIds.filter((id) => typeof id === "string").slice(-200)
             : [],

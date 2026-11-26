@@ -47,7 +47,8 @@ export const variable = {
     spawnExited: false,
     fastfallReady: true,
     fastfallBlocked: false,
-    persistentXP: 0,
+    // Exact decimal string (may exceed 2^53 after developer commands).
+    persistentXP: "0",
     runXP: 0,
     // Which mode this game session plays ("main" | "ffa", see
     // shared-data/GameModes.js). Requested from the Home screen, then

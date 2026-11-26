@@ -5,6 +5,7 @@ import { getEnemyBodyMetrics } from "../../../shared-data/Geometry.js";
 import { applyKnockbackToVelocity } from "../../../shared-data/Combat.js";
 import { stepDragVelocity } from "../../../shared-data/Movement.js";
 import { applyPlayerDamage } from "./PlayerHealth.js";
+import { getEnemyStatExponent } from "../../../shared-data/Progression.js";
 
 function enemyCenterX(enemy) {
     return enemy.x + enemy.width / 2;
@@ -69,7 +70,7 @@ export function stepEnemyMovement(enemies, deltaMs) {
     const dt = Math.max(0, deltaMs) / 1000;
 
     for (const [, { body }] of enemies) {
-        const force = body.moveIntent * SETTINGS.ENEMY_BASE_MOVE_FORCE * SETTINGS.ENEMY_MOVE_FORCE_GROWTH ** (body.rarity + 1) * body.moveForceScale;
+        const force = body.moveIntent * SETTINGS.ENEMY_BASE_MOVE_FORCE * SETTINGS.ENEMY_MOVE_FORCE_GROWTH ** getEnemyStatExponent(body.rarity) * body.moveForceScale;
 
         body.velocity.x = stepDragVelocity(
             body.velocity.x,
@@ -250,7 +251,15 @@ function _executeEnemyAttack(enemy) {
 
 // Single hit path for every player attack on an enemy. Knockback is mass-aware;
 // stun is opt-in per attack (Fastfall passes stunMs > 0, Slash passes 0).
-export function applyEnemyHit(body, { damage, fromX, fromY, strength, stunMs = 0 }) {
+// `attackerId` (a player's session id) is passed by player attacks only; for
+// a boss it records the damage that player ACTUALLY dealt (never more than
+// the health it had left) for shared kill credit.
+export function applyEnemyHit(body, { damage, fromX, fromY, strength, stunMs = 0, attackerId = null }) {
+    if (body.damageBy && attackerId && damage > 0 && body.health > 0) {
+        const dealt = Math.min(damage, body.health);
+        body.damageBy.set(attackerId, (body.damageBy.get(attackerId) || 0) + dealt);
+    }
+
     body.health -= damage;
 
     applyKnockbackToVelocity(
@@ -272,7 +281,7 @@ export function applyEnemyHit(body, { damage, fromX, fromY, strength, stunMs = 0
 // smaller than ENEMY_ATTACK_SWEEP), tested with a dot product against each
 // enemy's normalized direction from the origin rather than atan2, since this
 // runs against every live enemy (up to MAX_ENEMIES) on every click.
-export function applySlashToEnemies(enemies, originX, originY, dirX, dirY, damage) {
+export function applySlashToEnemies(enemies, originX, originY, dirX, dirY, damage, attackerId = null) {
     const halfArcRad = (SETTINGS.PLAYER_SLASH_ARC / 2) * (Math.PI / 180);
     const cosHalfArc = Math.cos(halfArcRad);
     const deadIds = [];
@@ -294,7 +303,7 @@ export function applySlashToEnemies(enemies, originX, originY, dirX, dirY, damag
         }
 
         // Slash: damage + knockback, never stun.
-        applyEnemyHit(body, { damage, fromX: originX, fromY: originY, strength: SETTINGS.PLAYER_SLASH_KNOCKBACK, stunMs: 0 });
+        applyEnemyHit(body, { damage, fromX: originX, fromY: originY, strength: SETTINGS.PLAYER_SLASH_KNOCKBACK, stunMs: 0, attackerId });
 
         if (body.health <= 0) {
             deadIds.push(id);

@@ -1,6 +1,7 @@
 import { getSession, signOut } from "../Multiplayer/FirebaseConfig.js";
 import { loadGuestProfile } from "../Multiplayer/GuestStore.js";
 import { getLevelProgress } from "../../../../shared-data/Progression.js";
+import { formatXP, xpToString } from "../../../../shared-data/XPMath.js";
 import { GAME_MODES } from "../../../../shared-data/GameModes.js";
 import { variable } from "../GameValues/LocalVariables.js";
 
@@ -207,7 +208,7 @@ export function createHome(session) {
         const xpLabel = this.add.text(
             width / 2,
             barY + 24,
-            `${Math.floor(intoLevel)} / ${Math.floor(span)} XP`,
+            `${formatXP(intoLevel)} / ${formatXP(span)} XP`,
             {
                 fontSize: "16px",
                 fontFamily: "Ubuntu",
@@ -269,7 +270,7 @@ export function createHome(session) {
         const start = (mode) => {
             const identity = isGuest ? "guest" : "account";
             const username = isGuest ? guest.profile.name : session.username;
-            const xp = isGuest ? guest.profile.xp : (session.xp || 0);
+            const xp = xpToString(isGuest ? guest.profile.xp : session.xp);
 
             variable.identity = identity;
             variable.username = username;

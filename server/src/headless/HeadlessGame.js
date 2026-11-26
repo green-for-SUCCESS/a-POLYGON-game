@@ -3,7 +3,8 @@ import StaticBody from "../../node_modules/phaser/src/physics/arcade/StaticBody.
 
 import { SETTINGS } from "../../../shared-data/Constants.js";
 import { blockWidth, blockHeight } from "../../../shared-data/Environment.js";
-import { getEnemyStats, getPlayerStatsFromXP, getLevelFromXP, rollEnemyRarity, sanitizeXP } from "../../../shared-data/Progression.js";
+import { getEnemyStats, getPlayerStatsFromXP, getLevelFromXP, rollZoneRarity, isBossRarity, computeBossRewards } from "../../../shared-data/Progression.js";
+import { toXP, xpToString, addRegularXP, XP_DEV_CAP, XP_REGULAR_CAP } from "../../../shared-data/XPMath.js";
 import { clampPlayerOutOfSpawn, getCombatZones, getSpawnZoneEnd } from "../../../shared-data/Zones.js";
 import { getLinearFalloff, getFastfallCooldown } from "../../../shared-data/Combat.js";
 import { createEnemy, updateEnemyAI, tickEnemyAttack, stepEnemyMovement, applySlashToEnemies, applyEnemyHit, enemyCenterX, enemyCenterY } from "./Enemies.js";
@@ -48,6 +49,14 @@ export class HeadlessGame {
         this.enemies = new Map();
         this.players = null;
         this.nextEnemyId = 0;
+        // Living enemies per ORIGIN zone (where they spawned, regardless of
+        // where they wander), so each zone's cap is O(1) to check instead of
+        // scanning every enemy every tick. Incremented on spawn, decremented
+        // exactly once when the enemy is removed (_killEnemy).
+        this.zoneEnemyCounts = new Map();
+        // The one rarity-13 boss allowed on the map at a time (its enemy id),
+        // or null. Set when the boss spawns, cleared when it is removed.
+        this.bossEnemyId = null;
         this.pendingKnockbacks = [];
         this.pendingPersists = [];
         this.pendingFastfallDenials = [];
@@ -72,19 +81,49 @@ export class HeadlessGame {
 
     // The XP that sets this player's level/stats: their persistent XP, in
     // every mode (main-mode run XP only counts once it is banked at death).
+    // (Exact BigInt; player.xp itself is a decimal string, see XPMath.js.)
     _progressXP(player) {
-        return player.xp || 0;
+        return toXP(player.xp);
     }
 
     // The one place persistent XP changes are queued for saving. BattleRoom
     // gives each one a unique event id and sends it to the player's client,
     // which applies it to Firestore (account) or localStorage (guest)
-    // idempotently. `kind` is "add" (amount is a delta) or "set" (/setxp).
+    // idempotently. `kind`: "addRegular" (gameplay XP, capped at 10^15 by
+    // the store as well), "add" (/givexp delta) or "set" (/setxp).
     _queueXPEvent(sessionId, kind, amount) {
-        if (!(amount > 0) && kind === "add") {
+        const value = toXP(amount);
+        if ((kind === "add" || kind === "addRegular") && value === 0n) {
             return;
         }
-        this.pendingPersists.push({ sessionId, kind, amount: sanitizeXP(amount) });
+        this.pendingPersists.push({ sessionId, kind, amount: xpToString(value) });
+    }
+
+    // Ordinary gameplay XP (enemy kills, boss rewards) for a player in the
+    // middle of a run goes to runXP and is banked at death, as before. It is
+    // capped so persistent XP + run XP never passes XP_REGULAR_CAP, and a
+    // player already at or above the cap (e.g. via /setxp) gains nothing.
+    _addRunXP(player, reward) {
+        const total = this._progressXP(player) + toXP(player.runXP);
+        if (total >= XP_REGULAR_CAP) {
+            return;
+        }
+        const room = XP_REGULAR_CAP - total;
+        const add = toXP(reward) > room ? room : toXP(reward);
+        // runXP stays a Number: it is below the regular cap (< 2^53), so exact.
+        player.runXP = Number(toXP(player.runXP) + add);
+    }
+
+    // Ordinary gameplay XP added straight to persistent XP and saved now
+    // (FFA kills, or a boss reward for a player who is between lives).
+    _addPersistentRegularXP(sessionId, player, reward) {
+        const { xp, added } = addRegularXP(player.xp, reward);
+        if (added === 0n) {
+            return false;
+        }
+        player.xp = xpToString(xp);
+        this._queueXPEvent(sessionId, "addRegular", added);
+        return true;
     }
 
     applyRunStart(player) {
@@ -193,7 +232,7 @@ export class HeadlessGame {
         player.slashSeq = (player.slashSeq || 0) + 1;
 
         const stats = player._stats || getPlayerStatsFromXP(this._progressXP(player));
-        const deadIds = applySlashToEnemies(this.enemies, player.x, player.y, dirX, dirY, stats.damage);
+        const deadIds = applySlashToEnemies(this.enemies, player.x, player.y, dirX, dirY, stats.damage, sessionId);
 
         for (const id of deadIds) {
             this._killEnemy(id, player);
@@ -331,13 +370,13 @@ export class HeadlessGame {
         // a victim claiming a huge level must not be able to pour persistent
         // XP into someone else's account. (A killer inflating their own
         // claim gains nothing here; their save only ever receives deltas.)
-        const victimLevel = Math.min(getLevelFromXP(victim.xp || 0), getLevelFromXP(killer.xp || 0));
+        const victimLevel = Math.min(getLevelFromXP(victim.xp), getLevelFromXP(killer.xp));
         const reward = SETTINGS.FFA_KILL_XP_PER_VICTIM_LEVEL * victimLevel;
 
-        // Added to the killer's persistent XP and queued for saving right
-        // away, so it survives leaving FFA, a disconnect, or a later death.
-        killer.xp = sanitizeXP((killer.xp || 0) + reward);
-        this._queueXPEvent(hit.attackerId, "add", reward);
+        // Added to the killer's persistent XP (respecting the regular XP cap)
+        // and queued for saving right away, so it survives leaving FFA, a
+        // disconnect, or a later death.
+        this._addPersistentRegularXP(hit.attackerId, killer, reward);
 
         // Level up straight away. Max health rises by what the new level
         // adds, without a free full heal; this is not damage, so the
@@ -404,7 +443,7 @@ export class HeadlessGame {
     // no separate dev-only XP/database mechanism to keep in sync.
     // ---------------------------------------------------------------
     _applyAuthoritativeXP(sessionId, player, xp, kind, amount) {
-        player.xp = sanitizeXP(xp);
+        player.xp = xpToString(xp);
 
         const stats = getPlayerStatsFromXP(this._progressXP(player));
         player._stats = stats;
@@ -419,32 +458,29 @@ export class HeadlessGame {
         this._queueXPEvent(sessionId, kind, amount);
     }
 
-    // Deliberately bypasses xpFrozen: the freeze blocks *ordinary* gameplay
-    // XP income (see _killEnemy), not an explicit developer command.
+    // Deliberately bypasses xpFrozen and the regular XP cap: the freeze and
+    // the cap apply to *ordinary* gameplay XP, not to an explicit developer
+    // command. Developer XP is bounded only by XP_DEV_CAP (10^250).
+    // `amount` is a non-negative BigInt, already validated by BattleRoom.
     devGiveXP(sessionId, amount) {
         const player = this.players?.get(sessionId);
-        if (!player || !Number.isFinite(amount)) {
+        if (!player || typeof amount !== "bigint" || amount < 0n) {
             return { ok: false, error: "Invalid amount." };
         }
 
         const before = this._progressXP(player);
-        const after = sanitizeXP(before + amount);
-        if (after >= before) {
-            this._applyAuthoritativeXP(sessionId, player, after, "add", after - before);
-        } else {
-            // A negative /givexp lowers XP; saved as an explicit set.
-            this._applyAuthoritativeXP(sessionId, player, after, "set", after);
-        }
-        return { ok: true, xp: this._progressXP(player) };
+        const after = before + amount > XP_DEV_CAP ? XP_DEV_CAP : before + amount;
+        this._applyAuthoritativeXP(sessionId, player, after, "add", after - before);
+        return { ok: true, xp: this._progressXP(player), capped: before + amount > XP_DEV_CAP };
     }
 
     devSetXP(sessionId, amount) {
         const player = this.players?.get(sessionId);
-        if (!player || !Number.isFinite(amount) || amount < 0) {
+        if (!player || typeof amount !== "bigint" || amount < 0n || amount > XP_DEV_CAP) {
             return { ok: false, error: "Invalid amount." };
         }
 
-        this._applyAuthoritativeXP(sessionId, player, amount, "set", sanitizeXP(amount));
+        this._applyAuthoritativeXP(sessionId, player, amount, "set", amount);
         return { ok: true, xp: this._progressXP(player) };
     }
 
@@ -532,7 +568,7 @@ export class HeadlessGame {
                 return;
             }
 
-            if (this._countEnemiesInZone(zone) >= zone.cap) {
+            if ((this.zoneEnemyCounts.get(zone.id) || 0) >= zone.cap) {
                 continue;
             }
 
@@ -545,28 +581,31 @@ export class HeadlessGame {
         }
     }
 
-    _countEnemiesInZone(zone) {
-        let count = 0;
-
-        for (const [, { body }] of this.enemies) {
-            const x = enemyCenterX(body);
-            if (x >= zone.start && (x < zone.end || zone.end >= SETTINGS.WORLD_WIDTH)) {
-                count += 1;
-            }
-        }
-
-        return count;
-    }
-
     spawnEnemyInZone(zone) {
         const padding = 40;
         const minX = zone.start + padding;
         const maxX = Math.max(minX, zone.end - padding);
         const x = minX + Math.random() * (maxX - minX);
-        const rarity = rollEnemyRarity();
+        // Within the zone's [minRarity, maxRarity]; a rarity-12 roll may
+        // become the boss only while no boss is alive.
+        const rarity = rollZoneRarity(zone, { bossAvailable: this.bossEnemyId === null });
         const stats = getEnemyStats(rarity);
         const id = String(this.nextEnemyId++);
         const body = createEnemy(this.world, { x, rarity, stats });
+
+        // Counted only once the enemy really exists, and released exactly
+        // once in _killEnemy, so a failed spawn can't leak a slot.
+        body.originZoneId = zone.id;
+        body.countedInZone = true;
+        this.zoneEnemyCounts.set(zone.id, (this.zoneEnemyCounts.get(zone.id) || 0) + 1);
+
+        if (isBossRarity(rarity)) {
+            body.isBoss = true;
+            // Total damage each player actually dealt this boss, for shared
+            // credit when it dies. Lives and dies with this boss.
+            body.damageBy = new Map();
+            this.bossEnemyId = id;
+        }
 
         this.enemies.set(id, { body });
         return id;
@@ -612,6 +651,7 @@ export class HeadlessGame {
         const stats = player._stats || getPlayerStatsFromXP(this._progressXP(player));
         const radius = stats.fastfallRadius;
         const deadIds = [];
+        const attackerId = this._sessionIdOf(player);
 
         for (const [id, { body }] of this.enemies) {
             const ex = enemyCenterX(body);
@@ -631,6 +671,7 @@ export class HeadlessGame {
                 fromY: player.y,
                 strength: stats.fastfallKnockback * falloff,
                 stunMs: stats.fastfallStunDuration * falloff,
+                attackerId,
             });
 
             if (body.health <= 0) {
@@ -643,7 +684,7 @@ export class HeadlessGame {
         }
 
         if (this.isFFA) {
-            this._fastfallPlayers(this._sessionIdOf(player), player, stats);
+            this._fastfallPlayers(attackerId, player, stats);
         }
     }
 
@@ -656,6 +697,35 @@ export class HeadlessGame {
         return null;
     }
 
+    // Every player who dealt at least BOSS_REWARD_MIN_SHARE of the boss's max
+    // health gets the full boss XP (not split); anyone above
+    // BOSS_REWARD_BONUS_SHARE gets the bonus multiplier. Damage was recorded
+    // by the server as it was actually dealt (applyEnemyHit), never reported
+    // by clients. Called once, from _killEnemy, which runs once per enemy.
+    _awardBossRewards(body) {
+        if (body.rewardsGiven) {
+            return;
+        }
+        body.rewardsGiven = true;
+
+        const rewards = computeBossRewards(body.maxHealth, body.damageBy, body.xp || 0);
+        body.damageBy = null;
+
+        for (const [sessionId, reward] of rewards) {
+            const player = this.players?.get(sessionId);
+            if (!player || player.xpFrozen) {
+                continue; // left the room, or XP income frozen by a developer
+            }
+            if (!this.isFFA && player.health > 0 && !player.runEnded) {
+                this._addRunXP(player, reward);
+            } else {
+                // Between lives: their run XP was already banked, so save it
+                // straight to persistent XP instead of losing it.
+                this._addPersistentRegularXP(sessionId, player, reward);
+            }
+        }
+    }
+
     _killEnemy(id, killer) {
         const enemy = this.enemies.get(id);
         if (!enemy) {
@@ -665,8 +735,24 @@ export class HeadlessGame {
         // /togglefreezexp blocks *ordinary* XP income specifically — every
         // gameplay path that grants XP funnels through this one line, so
         // gating it here covers all of them, present and future.
-        if (!this.isFFA && killer && killer.health > 0 && !killer.xpFrozen) {
-            killer.runXP = (killer.runXP || 0) + (enemy.body.xp || 0);
+        const body = enemy.body;
+
+        if (body.isBoss) {
+            // Shared credit replaces the single-killer reward for bosses.
+            this._awardBossRewards(body);
+        } else if (!this.isFFA && killer && killer.health > 0 && !killer.xpFrozen) {
+            this._addRunXP(killer, body.xp || 0);
+        }
+
+        // Release this enemy's origin-zone slot and, for the boss, the global
+        // boss slot. Guarded so it can only ever happen once per enemy.
+        if (body.countedInZone) {
+            body.countedInZone = false;
+            const left = (this.zoneEnemyCounts.get(body.originZoneId) || 0) - 1;
+            this.zoneEnemyCounts.set(body.originZoneId, Math.max(0, left));
+        }
+        if (this.bossEnemyId === id) {
+            this.bossEnemyId = null;
         }
 
         // Remove the enemy's ground collider(s) too. disableBody alone left
@@ -714,10 +800,12 @@ export class HeadlessGame {
             return;
         }
 
-        const banked = player.runXP || 0;
-        player.xp = sanitizeXP((player.xp || 0) + banked);
+        // runXP was already capped as it was earned; addRegularXP re-checks
+        // in case persistent XP changed meanwhile (e.g. /setxp).
+        const { xp, added } = addRegularXP(player.xp, player.runXP || 0);
+        player.xp = xpToString(xp);
         player.runXP = 0;
-        this._queueXPEvent(sessionId, "add", banked);
+        this._queueXPEvent(sessionId, "addRegular", added);
     }
 
     flushKnockbacks() {

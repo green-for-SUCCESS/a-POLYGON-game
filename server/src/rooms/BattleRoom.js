@@ -3,7 +3,7 @@ import { BattleRoomState } from "./schema/BattleRoomState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { EnemyState } from "./schema/EnemyState.js";
 import { HeadlessGame } from "../headless/HeadlessGame.js";
-import { sanitizeXP } from "../../../shared-data/Progression.js";
+import { toXP, xpToString, parseXPInput, formatXP } from "../../../shared-data/XPMath.js";
 import { GAME_MODES } from "../../../shared-data/GameModes.js";
 import { verifyIdToken, isUidBanned, banUsername, unbanUsername, getXPFreeze, setXPFreeze, applyXPEventsForUid, isFirebaseAdminConfigured } from "../firebaseAdmin.js";
 
@@ -282,16 +282,19 @@ export class BattleRoom extends Room {
     }
 
     _handleDevXPCommand(client, data, mode) {
-        const amount = Number(data?.amount);
-        // No upper bound: any finite amount is accepted, and the result goes
-        // through sanitizeXP (floored, never negative, never Infinity).
-        if (!Number.isFinite(amount)) {
-            return `Usage: /${mode === "give" ? "givexp <amount> [player]" : "setxp <amount> [player]"}`;
+        // Exact, arbitrary-length whole numbers (or integer scientific
+        // notation like 1e250), parsed as BigInt: no precision is lost and
+        // nothing becomes Infinity. Negative, non-numeric, fractional and
+        // above-10^250 amounts are rejected, not clamped.
+        const usage = `Usage: /${mode === "give" ? "givexp <amount> [player]" : "setxp <amount> [player]"}`;
+        if (data?.amount === undefined || data?.amount === null || data?.amount === "") {
+            return usage;
         }
-
-        if (mode === "set" && amount < 0) {
-            return "XP cannot be set to a negative value.";
+        const parsed = parseXPInput(data.amount);
+        if (!parsed.ok) {
+            return `${parsed.error} ${usage}`;
         }
+        const amount = parsed.value;
 
         const username = String(data?.username || "").trim();
         const target = this._resolveTarget(client, username);
@@ -309,8 +312,8 @@ export class BattleRoom extends Room {
 
         const who = username || target.player?.name || "you";
         return mode === "give"
-            ? `Gave ${amount} XP to ${who} (now ${result.xp} XP).`
-            : `Set ${who}'s XP to ${result.xp}.`;
+            ? `Gave ${formatXP(amount)} XP to ${who} (now ${formatXP(result.xp)} XP${result.capped ? ", capped at the 10^250 maximum" : ""}).`
+            : `Set ${who}'s XP to ${formatXP(result.xp)}.`;
     }
 
     _handleDevToggleFreezeXP(data) {
@@ -476,7 +479,8 @@ export class BattleRoom extends Room {
         // The player's persistent XP, loaded by their client from their save
         // provider (Firestore account or local guest save), in every mode:
         // FFA keeps the player's level and adds to it.
-        player.xp = sanitizeXP(options?.xp);
+        // Exact decimal string (may exceed 2^53 after developer commands).
+        player.xp = xpToString(toXP(options?.xp));
         this.game.applyRunStart(player);
         // Restore a durable /togglefreezexp setting for returning verified
         // accounts; anonymous/guest sessions simply start unfrozen (there's

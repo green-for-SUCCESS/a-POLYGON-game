@@ -20,7 +20,7 @@
 // pending value saved by older clients (an absolute total of unknown age),
 // which must never lower the stored XP.
 
-import { sanitizeXP } from "./Progression.js";
+import { toXP, xpToStorage, xpToString, XP_DEV_CAP, XP_REGULAR_CAP } from "./XPMath.js";
 
 // How many applied ids a record remembers. Must stay well above the most
 // events a client can still have queued (client XPSync MAX_PENDING) plus
@@ -28,23 +28,38 @@ import { sanitizeXP } from "./Progression.js";
 // have aged out of the record by the time it is retried.
 export const XP_EVENT_HISTORY = 1000;
 
-const KINDS = new Set(["add", "set", "max"]);
+// "addRegular": ordinary gameplay XP (death banking, FFA kills, boss
+// rewards). The store applies the 10^15 regular cap itself, so two sessions
+// of the same player adding at once can't push the saved total past it.
+// "add": developer /givexp, bounded only by XP_DEV_CAP.
+const KINDS = new Set(["add", "addRegular", "set", "max"]);
 const EVENT_ID_PATTERN = /^[A-Za-z0-9:._-]{1,128}$/;
+
+// Amounts travel as decimal strings (exact at any size); plain numbers are
+// still accepted from older queued events.
+const AMOUNT_PATTERN = /^\d{1,260}$/;
+
+function isValidAmount(amount) {
+    if (typeof amount === "number") {
+        return Number.isFinite(amount) && amount >= 0;
+    }
+    return typeof amount === "string" && AMOUNT_PATTERN.test(amount);
+}
 
 export function isValidXPEvent(event) {
     return Boolean(event)
         && typeof event.eventId === "string"
         && EVENT_ID_PATTERN.test(event.eventId)
         && KINDS.has(event.kind)
-        && Number.isFinite(Number(event.amount))
-        && Number(event.amount) >= 0;
+        && isValidAmount(event.amount);
 }
 
+// Normalized form: amount as a decimal string, at most XP_DEV_CAP.
 export function normalizeXPEvent(event) {
     if (!isValidXPEvent(event)) {
         return null;
     }
-    return { eventId: event.eventId, kind: event.kind, amount: sanitizeXP(event.amount) };
+    return { eventId: event.eventId, kind: event.kind, amount: xpToString(toXP(event.amount)) };
 }
 
 function readEventIds(record) {
@@ -53,27 +68,37 @@ function readEventIds(record) {
 }
 
 // Pure: returns the new { xp, xpEventIds } and whether the event changed
-// anything. Never mutates `record`.
+// anything. Never mutates `record`. Arithmetic is exact (BigInt); the
+// returned xp is in save form (a Number while exact, else a decimal string).
 export function applyXPEvent(record, event) {
-    const current = sanitizeXP(record?.xp);
+    const current = toXP(record?.xp);
     const ids = readEventIds(record);
     const normalized = normalizeXPEvent(event);
 
     if (!normalized || ids.includes(normalized.eventId)) {
-        return { xp: current, xpEventIds: ids, applied: false };
+        return { xp: xpToStorage(current), xpEventIds: ids, applied: false };
     }
 
+    const amount = toXP(normalized.amount);
     let xp;
     if (normalized.kind === "set") {
-        xp = normalized.amount;
+        xp = amount;
     } else if (normalized.kind === "max") {
-        xp = Math.max(current, normalized.amount);
+        xp = current > amount ? current : amount;
+    } else if (normalized.kind === "addRegular") {
+        // Never raises XP that is already at/above the regular cap (e.g. set
+        // there by a developer), and never past it otherwise.
+        xp = current >= XP_REGULAR_CAP
+            ? current
+            : (current + amount > XP_REGULAR_CAP ? XP_REGULAR_CAP : current + amount);
     } else {
-        xp = sanitizeXP(current + normalized.amount);
+        // The server already capped gameplay rewards; this only guards the
+        // absolute ceiling.
+        xp = current + amount > XP_DEV_CAP ? XP_DEV_CAP : current + amount;
     }
 
     return {
-        xp,
+        xp: xpToStorage(xp),
         xpEventIds: [...ids, normalized.eventId].slice(-XP_EVENT_HISTORY),
         applied: true,
     };

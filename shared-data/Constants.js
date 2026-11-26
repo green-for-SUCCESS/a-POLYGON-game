@@ -44,21 +44,40 @@ export const SETTINGS = {
     // ---------------- ZONES ----------------
     SPAWN_ZONE_WIDTH: 500,
 
-    ZONE_PEACEFUL_CAP: 25,
-    ZONE_PEACEFUL_SPAWN_CHANCE: 0.1,
-
-    ZONE_RESTLESS_CAP: 50,
-    ZONE_RESTLESS_SPAWN_CHANCE: 0.25,
-
-    ZONE_CHAOTIC_CAP: 100,
-    ZONE_CHAOTIC_SPAWN_CHANCE: 0.5,
-
-    ZONE_ANARCHIC_CAP: 200,
-    ZONE_ANARCHIC_SPAWN_CHANCE: 0.75,
+    // Combat zones, in order (zone 1 = nearest spawn). All per-zone tuning
+    // lives here; Zones.js builds the zones from it.
+    //
+    // Living enemies that ORIGINATED in a zone (counted by where they
+    // spawned, not where they are now). Map-wide, not per player.
+    ZONE_ENEMY_CAP: 50,
+    // Spawn chance per second grows only slightly from zone to zone
+    // (linear): zone i spawns at BASE + PER_ZONE * (i - 1).
+    ZONE_SPAWN_CHANCE_BASE: 0.15,
+    ZONE_SPAWN_CHANCE_PER_ZONE: 0.05,
+    // [min, max] rarity an enemy spawned in each zone starts with.
+    ZONE_RARITY_RANGES: [[1, 3], [3, 6], [6, 9], [9, 12]],
 
     // ---------------- ENEMY RARITY / SHAPE ----------------
-    ENEMY_RARITY_MAX: 4,
+    // Highest ordinary rarity. Zone spawns roll from the zone's minimum and
+    // step up one rarity at a time with ENEMY_RARITY_UPGRADE_CHANCE, never
+    // past the zone's maximum.
+    ENEMY_RARITY_MAX: 12,
     ENEMY_RARITY_UPGRADE_CHANCE: 0.25,
+    // The boss rarity. Only an enemy that rolled ENEMY_RARITY_MAX can become
+    // one, with this chance, and only while no other boss is alive.
+    ENEMY_BOSS_RARITY: 13,
+    ENEMY_BOSS_CHANCE: 0.001,
+    // The boss applies each stat "growth per rarity" constant this many more
+    // times than rarity 12 (health, damage, mass, move force), but the XP
+    // growth constant only ENEMY_BOSS_XP_STEPS more times.
+    ENEMY_BOSS_STAT_STEPS: 5,
+    ENEMY_BOSS_XP_STEPS: 2,
+    // Shared boss credit: everyone who dealt at least MIN_SHARE of the boss's
+    // max health gets the full boss XP; anyone above BONUS_SHARE gets it
+    // multiplied by ENEMY_XP_GROWTH ^ BONUS_XP_STEPS.
+    BOSS_REWARD_MIN_SHARE: 0.05,
+    BOSS_REWARD_BONUS_SHARE: 0.5,
+    BOSS_REWARD_BONUS_XP_STEPS: 3,
     ENEMY_SIDE_LENGTH: 50,
 
     // ---------------- ENEMY STATS ----------------
@@ -108,6 +127,12 @@ export const SETTINGS = {
     // ---------------- PLAYER PROGRESSION ----------------
     LEVEL_XP_BASE: 100,
     LEVEL_XP_GROWTH: 1.25,
+
+    // XP caps, as powers of ten (see XPMath.js). Ordinary gameplay rewards
+    // stop at 10^XP_REGULAR_CAP_EXPONENT; developer commands can go up to
+    // 10^XP_DEV_CAP_EXPONENT, the ceiling for any XP value.
+    XP_REGULAR_CAP_EXPONENT: 15,
+    XP_DEV_CAP_EXPONENT: 250,
 
     PLAYER_BASE_MAX_HEALTH: 20,
     PLAYER_HEALTH_GROWTH: 1.05,
@@ -183,10 +208,23 @@ export const ENEMY_STATE = {
     COOLDOWN: 3
 };
 
+// One per rarity 0..ENEMY_BOSS_RARITY (the last is the boss).
 export const ENEMY_RARITY_COLORS = [
-    0xff4444,
-    0xffaa33,
-    0x44dd66,
-    0x4488ff,
-    0xcc55ff,
+    0xff4444, // 0
+    0xffaa33, // 1
+    0x44dd66, // 2
+    0x4488ff, // 3
+    0xcc55ff, // 4
+    0x33dddd, // 5
+    0xffdd33, // 6
+    0xff66aa, // 7
+    0x8866ff, // 8
+    0x99ee33, // 9
+    0xff7733, // 10
+    0x3366cc, // 11
+    0xdddddd, // 12
+    // Enemy textures are filled with their color AND tinted with it, so the
+    // color is effectively squared; it must stay bright to show on the black
+    // background (a dark gray here made the boss nearly invisible).
+    0xff22ff, // 13 boss
 ];

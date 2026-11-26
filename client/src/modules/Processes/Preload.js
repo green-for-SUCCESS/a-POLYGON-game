@@ -16,7 +16,8 @@ export function preload() {
     // first use by ensurePlayerTexture in Entities/Players.js, since side
     // count has no upper limit any more.
 
-    for (let rarity = 0; rarity <= SETTINGS.ENEMY_RARITY_MAX; rarity++) {
+    // Every rarity, including the rarity-13 boss.
+    for (let rarity = 0; rarity <= SETTINGS.ENEMY_BOSS_RARITY; rarity++) {
         const sides = getEnemySides(rarity);
         const radius = getEnemyRadius(rarity);
         const size = Math.ceil(radius * 2) + 4;
